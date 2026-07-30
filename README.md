@@ -3,10 +3,10 @@
 </p>
 
 <p align="center">
-  <a href="./tests"><img alt="Local checks passing" src="https://img.shields.io/badge/checks-local%20pass-B8FF3D?style=flat-square&labelColor=0B0F0C"></a>
-  <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-4B8BFF?style=flat-square">
-  <img alt="Read-only first" src="https://img.shields.io/badge/safety-read--only%20first-B8FF3D?style=flat-square&labelColor=0B0F0C">
-  <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-E8ECE8?style=flat-square&labelColor=0B0F0C"></a>
+  <a href="./tests"><img alt="Local checks passing" src="https://img.shields.io/badge/checks-local%20pass-E2552D?style=flat-square&labelColor=161514"></a>
+  <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-5D5853?style=flat-square&labelColor=161514">
+  <img alt="Read-only first" src="https://img.shields.io/badge/safety-read--only%20first-E2552D?style=flat-square&labelColor=161514">
+  <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-F0EADF?style=flat-square&labelColor=161514"></a>
 </p>
 
 <p align="center">

@@ -5,6 +5,9 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "ramraccoon" / "SKILL.md"
 OPENAI_YAML = ROOT / "skills" / "ramraccoon" / "agents" / "openai.yaml"
+README = ROOT / "README.md"
+HERO = ROOT / "assets" / "ramraccoon-hero.svg"
+MARK = ROOT / "skills" / "ramraccoon" / "assets" / "ramraccoon-mark.svg"
 SNAPSHOT = (
     ROOT
     / "skills"
@@ -35,7 +38,13 @@ require(len(skill_text.splitlines()) < 500, "SKILL.md should stay below 500 line
 openai_text = OPENAI_YAML.read_text(encoding="utf-8")
 require('display_name: "RAM Raccoon"' in openai_text, "display name is missing")
 require("$ramraccoon" in openai_text, "default prompt must mention $ramraccoon")
-require('brand_color: "#B8FF3D"' in openai_text, "brand color is missing")
+require('brand_color: "#E2552D"' in openai_text, "brand color is missing")
+
+brand_text = "\n".join(
+    path.read_text(encoding="utf-8") for path in (README, HERO, MARK, OPENAI_YAML)
+)
+require("#E2552D" in brand_text, "vermilion brand accent is missing")
+require("#B8FF3D" not in brand_text.upper(), "retired lime brand color returned")
 
 snapshot_text = SNAPSHOT.read_text(encoding="utf-8")
 for forbidden in (

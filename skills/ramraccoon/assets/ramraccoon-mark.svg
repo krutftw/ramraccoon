@@ -1,14 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">RAM Raccoon mark</title>
-  <desc id="desc">A geometric raccoon mask inside a dark rounded square.</desc>
-  <rect width="512" height="512" rx="112" fill="#0B0F0C"/>
-  <path d="M112 166 72 92l104 34M400 166l40-74-104 34" fill="#77827A"/>
-  <path d="M256 92c105 0 172 70 172 165 0 111-75 175-172 175S84 368 84 257c0-95 67-165 172-165Z" fill="#D8DDD7"/>
-  <path d="M92 226c46-61 100-78 164-37-36 104-111 119-164 37Zm328 0c-46-61-100-78-164-37 36 104 111 119 164 37Z" fill="#242B26"/>
-  <path d="M172 222c24-20 53-17 74 5-17 36-57 44-86 17 1-8 5-15 12-22Zm168 0c-24-20-53-17-74 5 17 36 57 44 86 17-1-8-5-15-12-22Z" fill="#B8FF3D"/>
-  <circle cx="203" cy="234" r="13" fill="#0B0F0C"/>
-  <circle cx="309" cy="234" r="13" fill="#0B0F0C"/>
-  <path d="m256 267 45 38-45 30-45-30 45-38Z" fill="#0B0F0C"/>
-  <path d="M183 351c22 33 48 49 73 49s51-16 73-49" fill="none" stroke="#77827A" stroke-width="18" stroke-linecap="round"/>
-  <path d="M51 166h51M410 166h51M51 346h51M410 346h51" stroke="#B8FF3D" stroke-width="14" stroke-linecap="round"/>
+  <desc id="desc">An abstract striped raccoon tail in near-black and burnt vermilion.</desc>
+  <rect width="512" height="512" rx="88" fill="#161514"/>
+  <defs>
+    <path id="tail-mark" d="M154 432C87 293 133 141 256 70c82-47 186-23 215 50 29 74-19 148-86 158-58 9-107-29-108-81-1-31 15-55 42-70-55 0-104 42-128 99-34 79-19 142 42 188Z"/>
+    <clipPath id="mark-clip">
+      <use href="#tail-mark"/>
+    </clipPath>
+  </defs>
+  <use href="#tail-mark" fill="#E2552D" stroke="#F0EADF" stroke-width="8" stroke-linejoin="round"/>
+  <g clip-path="url(#mark-clip)" fill="#161514">
+    <path d="m93 332 173 132 82-38-221-170Z"/>
+    <path d="m112 216 174 127 62-62-198-144Z"/>
+    <path d="m210 91 178 111 41-72L250 19Z"/>
+  </g>
+  <rect x="82" y="113" width="38" height="38" fill="#F0EADF"/>
+  <path d="m101 151 80 43" fill="none" stroke="#F0EADF" stroke-width="8" stroke-dasharray="4 14"/>
 </svg>

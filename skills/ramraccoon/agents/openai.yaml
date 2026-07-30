@@ -3,7 +3,7 @@ interface:
   short_description: "Audit agents and contain runaway memory"
   icon_small: "./assets/ramraccoon-mark.svg"
   icon_large: "./assets/ramraccoon-mark.svg"
-  brand_color: "#B8FF3D"
+  brand_color: "#E2552D"
   default_prompt: "Use $ramraccoon to decide which agents are still needed and check Codex memory pressure."
 
 policy:
