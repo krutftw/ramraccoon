@@ -1,0 +1,41 @@
+name: Bug report
+description: Report incorrect audit behavior or snapshot output
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove usernames, paths, command arguments, tokens, and task content before posting.
+  - type: input
+    id: version
+    attributes:
+      label: RAM Raccoon version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and Codex version
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Use sanitized aggregate counts. Do not paste full process command lines.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed secrets, private paths, usernames, and task content.
+          required: true

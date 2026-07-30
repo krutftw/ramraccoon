@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a safer or more useful housekeeping capability
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What operator problem should RAM Raccoon solve?
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Proposed behavior
+      description: Explain the evidence and safety boundary.
+    validations:
+      required: true
+  - type: checkboxes
+    id: termination
+    attributes:
+      label: Process safety
+      options:
+        - label: This proposal does not rely only on process name, age, or idle CPU to terminate anything.
+          required: true
