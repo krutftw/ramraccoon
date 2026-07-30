@@ -1,0 +1,31 @@
+{
+  "SchemaVersion": "1.0",
+  "RecordedAt": "2026-07-30T04:13:21.552Z",
+  "TestType": "controlled isolated process-tree recovery",
+  "TargetType": "RAM Raccoon Node fixture, not a Codex runtime",
+  "Platform": "win32",
+  "Architecture": "x64",
+  "Result": "PASSED",
+  "Termination": {
+    "ApplicationProcessesAttempted": 2,
+    "ApplicationProcessesStillRunning": 0,
+    "ProtectedConsoleHostsExcluded": true
+  },
+  "MeasuredTarget": {
+    "Metric": "private bytes",
+    "BeforeGiB": 0.07,
+    "AfterGiB": 0,
+    "DeltaGiB": -0.07,
+    "ReclaimedGiB": 0.07
+  },
+  "Assertions": {
+    "ExactPidAndStartIdentityReverified": true,
+    "UnrelatedCodexRuntimeTargeted": false,
+    "FullCommandLinesEmitted": false,
+    "DetachedWorkerCompletedAfterTargetExit": true
+  },
+  "Limitations": [
+    "This validates the termination and measurement engine, not real Codex leak recovery.",
+    "A real Codex before-and-after result requires an explicitly approved runtime recovery."
+  ]
+}

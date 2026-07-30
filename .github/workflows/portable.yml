@@ -1,0 +1,43 @@
+name: Portable checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-24.04
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+          - name: macOS ARM64
+            runner: macos-14
+          - name: macOS Intel
+            runner: macos-15-intel
+          - name: Windows x64
+            runner: windows-2025
+          - name: Windows ARM64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Runtime identity
+        run: |
+          node --version
+          node -e "console.log('platform=' + process.platform + ' arch=' + process.arch)"
+      - name: Portable contracts
+        run: node --test tests/test_portable.mjs
+      - name: Platform snapshot
+        run: node skills/ramraccoon/scripts/ramraccoon.mjs snapshot --json
+      - name: Controlled recovery engine
+        run: node tests/Test-RamRaccoonRecovery.mjs

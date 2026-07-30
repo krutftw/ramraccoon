@@ -1,0 +1,27 @@
+{
+  "SchemaVersion": "1.0",
+  "RecordedAt": "2026-07-30",
+  "TestType": "streamed no-install platform snapshot",
+  "Platform": "linux",
+  "Architecture": "x64",
+  "NodeVersion": "v24.18.0",
+  "Result": "PASSED",
+  "Snapshot": {
+    "RuntimeSchemaVersion": "2.0",
+    "TopLevelAppServers": 0,
+    "MemoryMetric": "summed RSS",
+    "Risk": "HEALTHY"
+  },
+  "Assertions": {
+    "ProcessEnumerationCompleted": true,
+    "LinuxMemoryCollectionCompleted": true,
+    "CommandLinesEmitted": false,
+    "ProcessesTerminated": 0,
+    "RemoteFilesCreated": 0
+  },
+  "Limitations": [
+    "No Codex app-server was running on the smoke-test host.",
+    "This proves Linux collector execution, not Linux Codex recovery.",
+    "ARM64 and macOS execution remain pending hosted runner results."
+  ]
+}

@@ -6,13 +6,29 @@ Please report a vulnerability through GitHub private vulnerability reporting whe
 
 ## Safety model
 
-RAM Raccoon v0.1 is read-only at the operating-system layer. The bundled script:
+RAM Raccoon audits and snapshots read-only by default. The collectors:
 
-- reads Windows process and memory metadata;
+- read local process and memory metadata;
 - emits aggregate process-family counts;
 - suppresses full command lines;
-- never calls `Stop-Process`, `taskkill`, WMI termination methods, or native termination APIs.
+- make no network request;
+- terminate no process.
 
 The agent workflow may recommend or invoke Codex's documented child-agent interruption operation when the user requested cleanup. Interruption is not presented as proof that an MCP runtime was unloaded.
 
-Any proposal to terminate processes automatically must include a verifiable ownership protocol, PID-reuse protection, dry-run behavior, recovery design, and adversarial tests. Age/name heuristics are not sufficient.
+Explicit recovery is a separate destructive operation. It:
+
+- requires a saved resume checkpoint and the user's approval;
+- requires `--yes` and exactly one top-level Codex app-server target;
+- re-checks the exact PID, executable role, and process start identity;
+- terminates only that verified app-server and its descendants;
+- excludes Windows console-host and terminal-host processes;
+- records the target, termination result, and measured before/after values;
+- never modifies or deletes the persisted task transcript.
+
+Recovery disconnects the current task and stops every process owned by that
+runtime, including terminals and MCP servers. Do not run it while an external
+service under the task must survive.
+
+Age, idle CPU, duplicate names, and memory size are never sufficient ownership
+proof. If verification fails, recovery refuses to act.

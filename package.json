@@ -1,0 +1,18 @@
+{
+  "name": "ramraccoon",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Cross-platform housekeeping and measured memory recovery for long-running Codex sessions",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/test_portable.mjs && python tests/test_skill.py",
+    "test:portable": "node --test tests/test_portable.mjs",
+    "test:recovery": "node tests/Test-RamRaccoonRecovery.mjs",
+    "test:windows": "pwsh -NoProfile -File tests/Test-RamRaccoonSnapshot.ps1",
+    "test:live": "pwsh -NoProfile -File tests/Test-RamRaccoonEndToEnd.ps1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
