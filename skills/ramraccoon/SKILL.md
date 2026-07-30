@@ -68,6 +68,24 @@ Interpret pressure as:
 
 Do not promise that interrupting agents will lower RAM. Re-run the snapshot and compare verified process/private-byte counts.
 
+## Measure before and after
+
+When the user asks for proof, capture the read-only JSON before any approved
+restart or other action. After the action and resume, capture a second snapshot
+and run:
+
+```powershell
+& "<skill-directory>\scripts\Compare-RamRaccoonSnapshots.ps1" `
+    -Before "<before.json>" `
+    -After "<after.json>" `
+    -Json
+```
+
+Report the raw before value, raw after value, and signed delta. A lower value
+afterward is evidence of a reduction, but do not attribute causation to an agent
+interruption or restart unless the timing and actions support that conclusion.
+Never invent an “amount saved” when an after snapshot does not exist.
+
 ## Prepare a restart checkpoint
 
 When a restart is needed, provide a compact checkpoint containing:

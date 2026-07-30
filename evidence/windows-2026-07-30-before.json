@@ -1,0 +1,58 @@
+{
+  "SchemaVersion": "1.0",
+  "Timestamp": "2026-07-30T11:19:03.038627+08:00",
+  "Host": {
+    "OS": "Microsoft Windows 11 Pro",
+    "OSVersion": "10.0.26100",
+    "PhysicalTotalGiB": 31.92,
+    "PhysicalUsedGiB": 31.92,
+    "CommittedGiB": 85.51,
+    "CommitLimitGiB": 88.83,
+    "CommitPercent": 96.3,
+    "CodexPackageVersion": "26.721.11231.0"
+  },
+  "Risk": {
+    "Level": "CRITICAL",
+    "Reasons": [
+      "Windows commit usage is 96.3 percent.",
+      "Codex app-server trees reserve 25.27 GiB of private memory.",
+      "Codex app-server trees contain 387 processes."
+    ]
+  },
+  "Totals": {
+    "TopLevelAppServers": 1,
+    "CodexProcessCount": 387,
+    "WorkingSetGiB": 7.66,
+    "PrivateMemoryGiB": 25.27
+  },
+  "AppServers": [
+    {
+      "McpMarkers": {
+        "CommonBundleFloor": 17
+      }
+    }
+  ],
+  "Recommendations": [
+    "Do not spawn more agents. Checkpoint active work and restart Codex when safe.",
+    "At least 17 repeated MCP bundle markers are present; interruption alone may not unload them."
+  ],
+  "Safety": {
+    "ReadOnly": true,
+    "ProcessesTerminated": 0,
+    "CommandLinesEmitted": false
+  },
+  "Evidence": {
+    "Release": "v0.1.1",
+    "Commit": "22d549b53a6741f4c1860d5292df4cba6048924e",
+    "Source": "globally installed public GitHub package",
+    "AgentTree": {
+      "RootAgents": 1,
+      "NonRootAgents": 0,
+      "ActionsTaken": 0
+    },
+    "Limitations": [
+      "This snapshot proves detection and safety, not memory reclamation.",
+      "A controlled Codex restart is required before an after snapshot can measure reclaimed runtime memory."
+    ]
+  }
+}

@@ -84,6 +84,34 @@ pwsh -NoProfile -File .\skills\ramraccoon\scripts\Get-RamRaccoonSnapshot.ps1 -Js
 
 The script takes one bounded CIM process snapshot, locates top-level `codex.exe app-server` trees, aggregates private/working-set memory, detects common MCP families, and emits no process command lines.
 
+## Evidence, not promises
+
+A clean install from the public repository was discovered by Codex and executed
+against a real long-running Windows session:
+
+| Observed on 30 July 2026 | Result |
+|---|---:|
+| Windows commit | **96.3%** |
+| Codex process tree | **387 processes** |
+| Codex private memory | **25.27 GiB** |
+| Repeated MCP bundle floor | **17** |
+| Safety result | **0 processes terminated** |
+
+That run correctly classified the machine as `CRITICAL` and recommended a safe
+checkpoint and restart. It did **not** claim memory was reclaimed: the current
+task had no child agents to interrupt, and no restart had been approved.
+
+Read the complete [validation method](./docs/VALIDATION.md) and inspect the
+[sanitized source snapshot](./evidence/windows-2026-07-30-before.json). The
+[security assessment](./docs/SECURITY-ASSESSMENT.md) documents the source
+review, attack-pattern scan, and install-time marketplace results.
+
+Run the same live end-to-end check:
+
+```powershell
+pwsh -NoProfile -File .\tests\Test-RamRaccoonEndToEnd.ps1
+```
+
 ## Why this exists
 
 The behavior is tracked upstream in [openai/codex#25015](https://github.com/openai/codex/issues/25015): logical thread/subagent residency can remain coupled to eagerly started MCP runtimes, causing process and memory growth across long sessions.
@@ -92,13 +120,15 @@ RAM Raccoon provides a safe operator workflow while the lifecycle is fixed upstr
 
 ## Status
 
-**v0.1 preview**
+**v0.2.0**
 
 - [x] Main-session child-agent necessity audit
 - [x] Read-only Windows Codex process snapshot
 - [x] Commit/private-memory pressure levels
 - [x] Repeated MCP bundle markers
 - [x] Restart checkpoint contract
+- [x] Before/after snapshot comparator
+- [x] Reproducible public-install and live-runtime validation
 - [ ] macOS and Linux inspectors
 - [ ] App-server-native unload when a supported API exists
 - [ ] Historical trend snapshots

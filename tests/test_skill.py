@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import re
 
 
@@ -8,6 +9,16 @@ OPENAI_YAML = ROOT / "skills" / "ramraccoon" / "agents" / "openai.yaml"
 README = ROOT / "README.md"
 HERO = ROOT / "assets" / "ramraccoon-hero.svg"
 MARK = ROOT / "skills" / "ramraccoon" / "assets" / "ramraccoon-mark.svg"
+COMPARE = (
+    ROOT
+    / "skills"
+    / "ramraccoon"
+    / "scripts"
+    / "Compare-RamRaccoonSnapshots.ps1"
+)
+END_TO_END = ROOT / "tests" / "Test-RamRaccoonEndToEnd.ps1"
+EVIDENCE = ROOT / "evidence" / "windows-2026-07-30-before.json"
+E2E_EVIDENCE = ROOT / "evidence" / "windows-2026-07-30-e2e.json"
 SNAPSHOT = (
     ROOT
     / "skills"
@@ -58,5 +69,45 @@ for forbidden in (
 
 require("CommandLinesEmitted = $false" in snapshot_text, "privacy contract is missing")
 require("ProcessesTerminated = 0" in snapshot_text, "termination contract is missing")
+require(COMPARE.is_file(), "before/after comparator is missing")
+require(END_TO_END.is_file(), "end-to-end test is missing")
+require(EVIDENCE.is_file(), "sanitized evidence snapshot is missing")
+require(E2E_EVIDENCE.is_file(), "sanitized end-to-end evidence is missing")
+
+for runtime_file in (SNAPSHOT, COMPARE):
+    runtime_text = runtime_file.read_text(encoding="utf-8")
+    for forbidden in (
+        "Stop-Process",
+        "taskkill",
+        ".Terminate(",
+        "Win32_Process.Delete",
+        "TerminateProcess",
+        "Invoke-WebRequest",
+        "Invoke-RestMethod",
+        "Start-Process",
+        "Invoke-Expression",
+    ):
+        require(
+            forbidden not in runtime_text,
+            f"{runtime_file.name} contains forbidden operation {forbidden}",
+        )
+
+e2e_evidence_text = E2E_EVIDENCE.read_text(encoding="utf-8")
+e2e_evidence = json.loads(e2e_evidence_text)
+require(e2e_evidence["Result"] == "PASSED", "end-to-end evidence did not pass")
+require(
+    e2e_evidence["Runtime"]["ReportedProcessCount"]
+    == e2e_evidence["Runtime"]["IndependentProcessCount"],
+    "recorded independent process count does not match",
+)
+require(
+    e2e_evidence["Assertions"]["ProcessesTerminated"] == 0,
+    "recorded end-to-end run terminated a process",
+)
+for private_marker in ("C:\\Users", "Administrator", "SkillRoot", "AppServerPid"):
+    require(
+        private_marker not in e2e_evidence_text,
+        f"end-to-end evidence contains private marker {private_marker}",
+    )
 
 print("RAM Raccoon skill contract: OK")

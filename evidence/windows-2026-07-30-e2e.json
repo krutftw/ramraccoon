@@ -1,0 +1,33 @@
+{
+  "EvidenceSchema": "1.0",
+  "Timestamp": "2026-07-30T11:36:13.7916718+08:00",
+  "ReleaseCandidate": "v0.2.0",
+  "Result": "PASSED",
+  "SnapshotSchema": "1.0",
+  "Runtime": {
+    "Risk": "CRITICAL",
+    "ReportedProcessCount": 406,
+    "IndependentProcessCount": 406,
+    "ProcessCountTolerance": 41,
+    "PrivateMemoryGiB": 31.03,
+    "WorkingSetGiB": 7.94,
+    "CommitPercent": 90.3,
+    "PhysicalTotalGiB": 31.92,
+    "CodexPackageVersion": "26.721.11231.0",
+    "RepeatedMcpBundleFloor": 18
+  },
+  "Assertions": {
+    "InvalidPidRejected": true,
+    "AppServerSurvived": true,
+    "CommandLinePropertyAbsent": true,
+    "UsernameAbsent": true,
+    "ComparatorIdentityCheck": "UNCHANGED",
+    "ProcessesTerminated": 0
+  },
+  "Notes": [
+    "The published evidence omits the local skill path and ephemeral process ID.",
+    "The independent process count came from a separate Win32_Process tree walk.",
+    "This proves installation-compatible execution, detection accuracy, privacy boundaries, and non-termination.",
+    "It does not claim memory reclamation because no Codex restart was performed."
+  ]
+}
