@@ -1,5 +1,5 @@
 {
-  "RecordedAt": "2026-09-30T07:26:17.119627+00:00",
+  "RecordedAt": "2026-09-30T07:42:41.377333+00:00",
   "Version": "0.4.0",
   "Platform": "win32",
   "Architecture": "x64",
@@ -25,6 +25,20 @@
     "UnrelatedFixtureSurvived": true,
     "ObservedTargetReductionGiB": 0.08,
     "FullPostResumeBaselineRequired": true
+  },
+  "Distribution": {
+    "OfflinePackedInstall": "PASSED",
+    "InstalledCliVersion": "0.4.0",
+    "InstalledCliDoctorStatus": "ready",
+    "CleanPublicSkillInstall": "PASSED",
+    "PublicSourceCommit": "b901dd1c525e67645ea0f4299369a94e431c0c1a",
+    "PublicSkillVersion": "0.4.0",
+    "PublicSkillDoctorStatus": "ready"
+  },
+  "HostedVerification": {
+    "Run": "https://github.com/krutftw/ramraccoon/actions/runs/36684952519",
+    "JobsBlockedBeforeExecution": 9,
+    "Reason": "The job was not started because your account is locked due to a billing issue."
   },
   "NativePlatformLimitations": [
     "No current native macOS, Linux, ARM64, WSL, or container run",

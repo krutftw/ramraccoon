@@ -48,7 +48,8 @@ restricted-container results are not yet available for this release.
 See [VALIDATION.md](./VALIDATION.md) for reproducible commands, native versus
 parser-only coverage, current CI blockers, and earlier-release evidence.
 
-Historical install-time reports of Gen “Safe,” Socket “0 alerts,” and Snyk
-“Low Risk” applied to an earlier read-only release. They have not been rerun
-against v0.4 and are not certification of its recovery capability. No current
-independent audit, marketplace rescan, or numerical security score is claimed.
+Both the historical installer and the current clean public install displayed
+Gen “Safe,” Socket “0 alerts,” and Snyk “Low Risk.” The current installer did not
+identify which source commit those assessments scanned. They are not treated
+as a fresh v0.4 review or certification of recovery. No current independent
+audit, verified marketplace rescan, or numerical security score is claimed.

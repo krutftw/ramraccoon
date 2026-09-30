@@ -16,6 +16,7 @@ Local environment: Windows 11 Pro 10.0.26100, x64 Node 24.11.1.
 | Packed distribution | `npm pack` included both runtime modules, skill, metadata, and assets; no bundled runtime dependencies |
 | Offline local package install | Installed the packed tarball with `--offline --ignore-scripts --no-audit --no-fund` into a temporary prefix |
 | Installed CLI shim | `ramraccoon --version` returned 0.4.0; `ramraccoon doctor --json` returned ready on the actual Windows host |
+| Clean public skill install | `npx skills add krutftw/ramraccoon -a codex -s ramraccoon -y --copy` installed the published skill in an empty temporary project; its version was 0.4.0 and doctor returned ready |
 | Real Codex termination | Not performed or claimed |
 | Native macOS/Linux/ARM64/WSL/container execution | Not available for this revision; not claimed |
 
@@ -94,8 +95,8 @@ on an ARM machine does not count as native ARM validation.
 
 ### Current external blocker
 
-The repository's [recorded Actions run](https://github.com/krutftw/ramraccoon/actions/runs/30513938516)
-failed before any of its six jobs started. Every job annotation said:
+The [v0.4 push's Actions run](https://github.com/krutftw/ramraccoon/actions/runs/36684952519)
+failed before any of its nine jobs started. Every job annotation said:
 
 > The job was not started because your account is locked due to a billing issue.
 
@@ -152,7 +153,9 @@ Retained historical records from the earlier implementation:
 | [Controlled Windows recovery](../evidence/windows-2026-07-30-controlled-recovery.json) | Two fixture processes to zero; 0.07 GiB private decrease, not a real Codex recovery |
 | [Linux x64 smoke](../evidence/linux-2026-07-30-smoke.json) | Earlier schema 2.0 collector ran with Node 24.18.0 and no Codex target; not validation of the new Linux/cgroup implementation |
 
-A clean public skill install was recorded on 30 July 2026. Its marketplace
-scanner reports applied to that earlier release. They have not been rerun
-against v0.4. See [the capability review](./SECURITY-ASSESSMENT.md) for why no
-current independent audit or numerical safety score is claimed.
+A clean public skill install was recorded on 30 July 2026, and the v0.4 public
+install above succeeded again. The current installer displayed Gen “Safe,”
+Socket “0 alerts,” and Snyk “Low Risk,” but did not provide scan-commit
+provenance. Those labels are not treated as a fresh v0.4 audit or certification.
+See [the capability review](./SECURITY-ASSESSMENT.md); no independent audit or
+numerical safety score is claimed.
