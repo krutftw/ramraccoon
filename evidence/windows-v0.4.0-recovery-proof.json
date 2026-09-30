@@ -1,0 +1,80 @@
+{
+  "SchemaVersion": "1.0",
+  "Result": "PASSED",
+  "RecordedAt": "2026-09-30T08:31:05.684Z",
+  "Tool": {
+    "Name": "RAM Raccoon",
+    "Version": "0.4.0",
+    "SourceCommit": "50d347aa571304f72f0c90a9aaffa3386b134370",
+    "RuntimeSHA256": {
+      "ramraccoon.mjs": "abc3bd788456608667466e7e548826d664962c12d525dc3e5fe29a4e46748af2",
+      "platform.mjs": "2bbfff2d3276ae5709173cc86faa1831ed9d8ba8e0fbe1e092364d12ed0af6e5"
+    }
+  },
+  "Environment": {
+    "Platform": "win32",
+    "Architecture": "x64",
+    "NodeVersion": "24.11.1"
+  },
+  "Scope": "Selected owned Node fixture tree, including Windows console helpers; not a real Codex runtime",
+  "CaptureMethod": "Existing fixture-support helpers and actual recover CLI, plus an independent post-recovery birth-identity scan",
+  "Before": {
+    "Timestamp": "2026-09-30T08:30:53.401Z",
+    "SelectedProcesses": 4,
+    "TargetApplicationProcesses": 2,
+    "ProcessFamilies": [
+      {
+        "Name": "conhost.exe",
+        "Count": 2
+      },
+      {
+        "Name": "node.exe",
+        "Count": 2
+      }
+    ],
+    "SelectedPrivateMemoryGiB": 0.08,
+    "UnrelatedFixtureProcesses": 2,
+    "Collection": "Full PID-scoped before snapshot"
+  },
+  "After": {
+    "Timestamp": "2026-09-30T08:31:04.413Z",
+    "SelectedProcesses": 0,
+    "TargetApplicationProcesses": 0,
+    "SelectedPrivateMemoryGiB": 0,
+    "UnrelatedFixtureProcesses": 2,
+    "Collection": "Lightweight worker report; zero target footprint because recorded process identities exited, not a full system RAM sample"
+  },
+  "Termination": {
+    "Status": "completed",
+    "Attempted": 2,
+    "StillRunning": 0,
+    "ExcludedStillRunning": 0,
+    "IndependentRemainingTargetIdentities": 0,
+    "IndependentRemainingScopedIdentities": 0
+  },
+  "Comparison": {
+    "SelectedProcesses": {
+      "Before": 4,
+      "After": 0,
+      "Delta": -4
+    },
+    "SelectedPrivateMemoryGiB": {
+      "Metric": "private bytes",
+      "Before": 0.08,
+      "After": 0,
+      "Delta": -0.08,
+      "Reclaimed": 0.08
+    },
+    "SystemPhysicalMemoryDeltaGiB": null,
+    "SystemCommittedMemoryDeltaGiB": null
+  },
+  "Limits": [
+    "Controlled fixture evidence, not a real Codex leak-recovery result",
+    "Private committed memory is not resident RAM",
+    "No measured system-wide RAM or commit savings are claimed",
+    "The unrelated fixture was verified alive before test teardown",
+    "A real recovery still requires a full post-resume baseline",
+    "Windows x64 evidence does not certify other native platforms"
+  ],
+  "Privacy": "Allowlisted aggregate fields only; no command lines, private paths, real process inventory, thread content, or credentials"
+}

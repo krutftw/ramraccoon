@@ -32,6 +32,44 @@ The worker now reports excluded survivors separately and does not invent zero
 Codex memory for that case. Physical/commit after readings in the lightweight
 worker sample remain `null`; a normal post-resume snapshot is still required.
 
+## Recorded recovery images
+
+The README's [before/after image](../assets/recovery-proof.png) and
+[narrow-screen version](../assets/recovery-proof-mobile.png) render the
+[same sanitized capture](../evidence/windows-v0.4.0-recovery-proof.json).
+They are visualizations of recorded CLI evidence, not Task Manager screenshots
+or images of a real Codex leak fix.
+
+The capture completed on **30 September 2026 at 08:31 UTC**, using RAM Raccoon
+0.4.0 on Windows x64 / Node 24.11.1. The JSON includes the source commit, runtime
+file SHA-256 hashes, original measurement timestamps, and unmodified comparison
+values. It excludes command lines, paths, credentials, and real process inventory.
+
+This run's selected tree contained **four processes: two Node fixture
+applications and two Windows console helpers**. Its measured private committed
+memory was **0.08 GiB before**. Recovery targeted only the two applications;
+the protected console helpers exited with their owners. The worker reported
+zero remaining scoped identities and **0.00 GiB selected-tree footprint**.
+An independent post-recovery process scan confirmed all recorded identities
+were gone and both unrelated fixture applications were still alive.
+
+The capture reused `tests/fixture-support.mjs` and the actual `recover` CLI, with
+the controlled test's five-second delay and one-second settle interval. It also
+checked the whole scoped tree by birth identity. An initial capture assumption
+that the whole tree always contained only two processes was corrected after a
+read-only scan identified the console helpers; no runtime change was required.
+
+The existing test's “2 target application processes” and this image's “4 scoped
+processes” describe different, explicitly labelled counts. Console helper
+presence can vary; do not hard-code an application count as the full-tree count.
+The unrelated fixture was cleaned up only after its survival was verified.
+
+The after value comes from confirmed exit of the recorded identities, not a
+full host-memory sample. System physical-memory and system-commit deltas remain
+`null`. Private committed memory is not resident RAM; neither image claims
+system-wide savings, a real Codex recovery, or native cross-platform validation.
+The full post-resume baseline remains required for a real recovery.
+
 ## What the regressions establish
 
 - Missing after-readings remain unknown; they do not become 100% recovery.

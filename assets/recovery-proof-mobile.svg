@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="970" viewBox="0 0 640 970" role="img" aria-labelledby="title desc">
+<title id="title">RAM Raccoon controlled recovery: before and after</title>
+<desc id="desc">Controlled Windows x64 fixture: scoped processes 4 to 0 (2 application processes plus 2 Windows console helpers before); private committed memory 0.08 to 0.00 GiB; unrelated fixture applications 2 still alive. No system-wide RAM savings measured.</desc>
+<!-- Rendered from evidence/windows-v0.4.0-recovery-proof.json; not a terminal screenshot. -->
+<rect width="640" height="970" fill="#F0EADF"/>
+<text x="44" y="67" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="42" font-weight="700" text-anchor="start">Recovery, measured.</text>
+<text x="44" y="106" fill="#5D5853" font-family="Arial,Helvetica,sans-serif" font-size="24" font-weight="400" text-anchor="start">Controlled Node fixture · Windows x64</text>
+<path d="M44 140L596 140" stroke="#B8AEA1" stroke-width="1"/>
+<text x="44" y="194" fill="#B73C19" font-family="Arial,Helvetica,sans-serif" font-size="32" font-weight="700" text-anchor="start">Before</text>
+<text x="44" y="258" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="400" text-anchor="start">Scoped processes</text>
+<text x="596" y="260" fill="#161514" font-family="Consolas,Courier New,monospace" font-size="46" font-weight="700" text-anchor="end">4</text>
+<text x="44" y="291" fill="#5D5853" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="400" text-anchor="start">2 apps + 2 console helpers</text>
+<text x="44" y="341" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="400" text-anchor="start">Private committed</text>
+<text x="44" y="372" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="400" text-anchor="start">memory</text>
+<text x="596" y="360" fill="#161514" font-family="Consolas,Courier New,monospace" font-size="39" font-weight="700" text-anchor="end">0.08 GiB</text>
+<text x="44" y="433" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="400" text-anchor="start">Unrelated apps</text>
+<text x="596" y="433" fill="#161514" font-family="Consolas,Courier New,monospace" font-size="30" font-weight="700" text-anchor="end">2 alive</text>
+<text x="44" y="505" fill="#B73C19" font-family="Arial,Helvetica,sans-serif" font-size="32" font-weight="700" text-anchor="start">After</text>
+<text x="44" y="569" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="400" text-anchor="start">Scoped processes</text>
+<text x="596" y="571" fill="#161514" font-family="Consolas,Courier New,monospace" font-size="46" font-weight="700" text-anchor="end">0</text>
+<text x="44" y="602" fill="#5D5853" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="400" text-anchor="start">All recorded identities exited</text>
+<text x="44" y="652" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="400" text-anchor="start">Private committed</text>
+<text x="44" y="683" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="400" text-anchor="start">memory</text>
+<text x="596" y="671" fill="#161514" font-family="Consolas,Courier New,monospace" font-size="39" font-weight="700" text-anchor="end">0.00 GiB</text>
+<text x="44" y="744" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="400" text-anchor="start">Unrelated apps</text>
+<text x="596" y="744" fill="#161514" font-family="Consolas,Courier New,monospace" font-size="30" font-weight="700" text-anchor="end">2 alive</text>
+<path d="M44 465L596 465" stroke="#B8AEA1" stroke-width="1"/>
+<path d="M44 785L596 785" stroke="#B8AEA1" stroke-width="1"/>
+<text x="44" y="823" fill="#161514" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="700" text-anchor="start">Only the selected fixture was stopped.</text>
+<text x="44" y="858" fill="#5D5853" font-family="Arial,Helvetica,sans-serif" font-size="24" font-weight="400" text-anchor="start">No system-wide RAM savings measured.</text>
+<text x="44" y="889" fill="#5D5853" font-family="Arial,Helvetica,sans-serif" font-size="24" font-weight="400" text-anchor="start">Not a real Codex leak-recovery result.</text>
+<text x="44" y="929" fill="#5D5853" font-family="Consolas,Courier New,monospace" font-size="22" font-weight="400" text-anchor="start">2026-09-30 08:31:04 UTC</text>
+<text x="44" y="957" fill="#5D5853" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="400" text-anchor="start">RAM Raccoon 0.4.0 · source 50d347a</text>
+</svg>

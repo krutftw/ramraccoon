@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
+  <a href="#before-and-after-proof">Before / after</a> ·
   <a href="#platforms-and-devices">Platforms</a> ·
   <a href="./SECURITY.md">Safety</a> ·
   <a href="https://github.com/krutftw/ramraccoon/releases/tag/v0.4.0">Release notes</a>
@@ -192,10 +193,32 @@ A `partial` or `failed` result never authorizes broadening the target.
 
 Read the [safety and privacy model](./SECURITY.md) before using recovery.
 
+## Before-and-after proof
+
+These images visualize a recorded **controlled Windows test**, not screenshots
+of a real Codex leak recovery.
+
+<picture>
+  <source media="(max-width: 900px)" srcset="./assets/recovery-proof-mobile.png">
+  <img src="./assets/recovery-proof.png" alt="Controlled Windows fixture: 4 scoped processes became 0; private committed memory fell from 0.08 GiB to 0.00 GiB; both unrelated fixture applications survived. No system-wide RAM savings measured." width="100%">
+</picture>
+
+The selected tree contained **two test applications and two Windows console
+helpers**. RAM Raccoon targeted only the applications; the helpers exited with
+them. Both unrelated fixture applications were alive before test teardown.
+
+The 0.08 GiB is **selected-tree private committed memory**, not total resident
+RAM freed. The after value is zero because every recorded target identity
+exited; it is not a full post-resume host-memory sample.
+
+[Recorded JSON](./evidence/windows-v0.4.0-recovery-proof.json) ·
+[Capture method and limits](./docs/VALIDATION.md#recorded-recovery-images) ·
+[Full-size image](./assets/recovery-proof.png)
+
 ## Built on evidence
 
 **42 regression tests passed on Windows x64.** Live read-only diagnostics,
-controlled fixture recovery (**2 target processes → 0**, unrelated fixture
+controlled fixture recovery (**2 target applications → 0**, unrelated fixture
 survived), and clean public installation passed. No real Codex runtime was
 terminated for these checks. Native macOS/Linux/ARM64 results remain pending.
 [See the evidence and limitations](./docs/VALIDATION.md).
