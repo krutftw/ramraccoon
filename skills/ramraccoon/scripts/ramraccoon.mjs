@@ -1,27 +1,28 @@
 #!/usr/bin/env node
 
 import {
-  execFileSync,
   spawn,
 } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { hostMemory, platformSupport, powershellExecutable, processTable, run } from "./platform.mjs";
 
 const GIB = 1024 ** 3;
+const VERSION = "0.4.0";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const TEST_MODE =
   process.env.RAMRACCOON_TEST_MODE === "1" ||
   process.argv.includes("--internal-test-mode");
-let cachedPowerShell = null;
 
 function round(value, places = 2) {
   const factor = 10 ** places;
@@ -36,99 +37,36 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function run(command, args) {
-  return execFileSync(command, args, {
-    encoding: "utf8",
-    windowsHide: true,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-}
-
-function powershellExecutable() {
-  if (cachedPowerShell) return cachedPowerShell;
-  for (const candidate of ["pwsh.exe", "powershell.exe"]) {
-    try {
-      run(candidate, ["-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"]);
-      cachedPowerShell = candidate;
-      return cachedPowerShell;
-    } catch {
-      // Try the Windows PowerShell fallback.
-    }
+function commandArguments(row) {
+  if (Array.isArray(row.argv)) return row.argv;
+  const command = String(row.args || "").trim();
+  const tokens = (text) => (text.match(/"[^"]*"|'[^']*'|[^\s]+/g) || [])
+    .map((item) => item.replace(/^["']|["']$/g, ""));
+  if (row.executable && command.startsWith(`${row.executable} `)) {
+    return [row.executable, ...tokens(command.slice(row.executable.length))];
   }
-  throw new Error("PowerShell is required for process inspection on Windows.");
-}
-
-function windowsProcesses() {
-  const command = [
-    "$ErrorActionPreference='Stop'",
-    "$rows=Get-CimInstance Win32_Process | ForEach-Object {",
-    "  $started=$null",
-    "  if ($null -ne $_.CreationDate) { $started=$_.CreationDate.ToUniversalTime().ToString('o') }",
-    "  [pscustomobject]@{",
-    "    pid=[int]$_.ProcessId",
-    "    ppid=[int]$_.ParentProcessId",
-    "    name=[string]$_.Name",
-    "    args=[string]$_.CommandLine",
-    "    startedAt=$started",
-    "    rssBytes=[int64]$_.WorkingSetSize",
-    "    privateBytes=[int64]$_.PrivatePageCount",
-    "  }",
-    "}",
-    "@($rows) | ConvertTo-Json -Compress -Depth 3",
-  ].join("\n");
-
-  const parsed = JSON.parse(
-    run(powershellExecutable(), [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      command,
-    ]),
-  );
-  return Array.isArray(parsed) ? parsed : [parsed];
-}
-
-function unixProcesses() {
-  const output = run("ps", [
-    "-axo",
-    "pid=,ppid=,rss=,lstart=,comm=,args=",
-  ]);
-  const rows = [];
-  const pattern = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(\S+)\s*(.*)$/;
-
-  for (const line of output.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const match = line.match(pattern);
-    if (!match) continue;
-    rows.push({
-      pid: Number(match[1]),
-      ppid: Number(match[2]),
-      rssBytes: Number(match[3]) * 1024,
-      privateBytes: null,
-      startedAt: new Date(match[4]).toISOString(),
-      name: path.basename(match[5]),
-      args: match[6],
-    });
-  }
-  return rows;
-}
-
-function processTable() {
-  return process.platform === "win32" ? windowsProcesses() : unixProcesses();
-}
-
-function normalizedCommand(row) {
-  return `${row.name || ""} ${row.args || ""}`.toLowerCase();
+  return tokens(command);
 }
 
 function isAppServer(row) {
   if (!row) return false;
-  const name = path.basename(row.name || "").toLowerCase();
-  const command = normalizedCommand(row);
-  const codexExecutable = name === "codex" || name === "codex.exe";
-  const appServerArgument = /(^|[\s"'=])app-server(?=$|[\s"'])/.test(command);
-  if (codexExecutable && appServerArgument) return true;
-  return TEST_MODE && command.includes("ramraccoon-test-app-server");
+  const argv = commandArguments(row);
+  if (TEST_MODE && argv.includes("ramraccoon-test-app-server")) return true;
+  const name = path.win32.basename(path.posix.basename(row.name || "")).toLowerCase();
+  if (name !== "codex" && name !== "codex.exe") return false;
+  const valueOptions = new Set(["-c", "--config", "--enable", "--disable", "-p", "--profile", "-C", "--cd"]);
+  for (let index = 1; index < argv.length; index += 1) {
+    const option = argv[index];
+    if (valueOptions.has(option)) {
+      if (++index >= argv.length) return false;
+      continue;
+    }
+    if (option.startsWith("--") && valueOptions.has(option.split("=")[0]) && option.includes("=")) continue;
+    if (option === "--strict-config") continue;
+    // Only the actual subcommand identifies a server, never a prompt or config value.
+    return option === "app-server";
+  }
+  return false;
 }
 
 function indexProcesses(rows) {
@@ -234,103 +172,45 @@ function processFamilies(tree) {
     .slice(0, 8);
 }
 
-function windowsHostMemory() {
+function topMemoryConsumers(rows, platform = process.platform) {
+  const windows = platform === "win32";
+  const measuredBytes = (row) => Number((windows ? row.privateBytes : row.rssBytes) || 0);
+  return rows
+    .filter((row) => Number(row.pid) > 0)
+    .sort((a, b) => measuredBytes(b) - measuredBytes(a) || Number(a.pid) - Number(b.pid))
+    .slice(0, 10)
+    .map((row) => ({
+      Pid: Number(row.pid),
+      Name: path.basename(row.name || "unknown"),
+      StartedAt: row.startedAt || null,
+      MemoryMetric: windows ? "private bytes" : "RSS",
+      MemoryGiB: gib(measuredBytes(row)),
+      WorkingSetGiB: gib(row.rssBytes),
+      PrivateMemoryGiB: windows ? gib(row.privateBytes) : null,
+      Services: null,
+    }));
+}
+
+function windowsServices() {
   const command = [
     "$ErrorActionPreference='Stop'",
-    "$os=Get-CimInstance Win32_OperatingSystem",
-    "$perf=Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory -ErrorAction SilentlyContinue",
-    "$package=Get-AppxPackage -Name OpenAI.Codex -ErrorAction SilentlyContinue | Select-Object -First 1",
-    "[pscustomobject]@{",
-    " os=[string]$os.Caption",
-    " osVersion=[string]$os.Version",
-    " totalBytes=[int64]$os.TotalVisibleMemorySize*1KB",
-    " freeBytes=[int64]$os.FreePhysicalMemory*1KB",
-    " committedBytes=if($perf){[int64]$perf.CommittedBytes}else{$null}",
-    " commitLimitBytes=if($perf){[int64]$perf.CommitLimit}else{$null}",
-    " packageVersion=if($package){$package.Version.ToString()}else{$null}",
-    "} | ConvertTo-Json -Compress",
+    "ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Service -Filter 'ProcessId > 0' |",
+    "  Select-Object ProcessId,Name,DisplayName)",
   ].join("\n");
-  return JSON.parse(
-    run(powershellExecutable(), [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      command,
-    ]),
-  );
-}
-
-function linuxHostMemory() {
-  const values = new Map();
-  for (const line of readFileSync("/proc/meminfo", "utf8").split(/\r?\n/)) {
-    const match = line.match(/^([^:]+):\s+(\d+)\s+kB$/);
-    if (match) values.set(match[1], Number(match[2]) * 1024);
-  }
-  return {
-    os: `${os.type()} ${os.release()}`,
-    osVersion: os.release(),
-    totalBytes: values.get("MemTotal") || os.totalmem(),
-    freeBytes: values.get("MemAvailable") || os.freemem(),
-    committedBytes: values.get("Committed_AS") || null,
-    commitLimitBytes: values.get("CommitLimit") || null,
-    swapTotalBytes: values.get("SwapTotal") || 0,
-    swapFreeBytes: values.get("SwapFree") || 0,
-    packageVersion: null,
-  };
-}
-
-function parseByteQuantity(value, unit) {
-  const factor = { B: 1, K: 1024, M: 1024 ** 2, G: GIB, T: 1024 ** 4 }[
-    String(unit || "B").toUpperCase()
-  ];
-  return Number(value) * (factor || 1);
-}
-
-function macHostMemory() {
-  const totalBytes = Number(run("sysctl", ["-n", "hw.memsize"]).trim());
-  const vmStat = run("vm_stat", []);
-  const pageSize = Number(vmStat.match(/page size of (\d+) bytes/i)?.[1] || 4096);
-  const pages = {};
-  for (const line of vmStat.split(/\r?\n/)) {
-    const match = line.match(/^([^:]+):\s+(\d+)\./);
-    if (match) pages[match[1]] = Number(match[2]);
-  }
-  const availablePages =
-    (pages["Pages free"] || 0) +
-    (pages["Pages inactive"] || 0) +
-    (pages["Pages speculative"] || 0) +
-    (pages["Pages purgeable"] || 0);
-
-  let swapTotalBytes = 0;
-  let swapFreeBytes = 0;
   try {
-    const swap = run("sysctl", ["-n", "vm.swapusage"]);
-    const total = swap.match(/total\s*=\s*([\d.]+)([BKMG])/i);
-    const free = swap.match(/free\s*=\s*([\d.]+)([BKMG])/i);
-    if (total) swapTotalBytes = parseByteQuantity(total[1], total[2]);
-    if (free) swapFreeBytes = parseByteQuantity(free[1], free[2]);
+    const services = JSON.parse(
+      run(powershellExecutable(), ["-NoProfile", "-NonInteractive", "-Command", command]),
+    );
+    const byPid = new Map();
+    for (const service of services) {
+      const pid = Number(service.ProcessId);
+      if (!byPid.has(pid)) byPid.set(pid, []);
+      byPid.get(pid).push({ Name: service.Name, DisplayName: service.DisplayName });
+    }
+    return byPid;
   } catch {
-    // Swap metrics are optional on restricted macOS hosts.
+    return null;
   }
-
-  return {
-    os: `${os.type()} ${os.release()}`,
-    osVersion: os.release(),
-    totalBytes,
-    freeBytes: Math.min(totalBytes, availablePages * pageSize),
-    committedBytes: null,
-    commitLimitBytes: null,
-    swapTotalBytes,
-    swapFreeBytes,
-    packageVersion: null,
-  };
-}
-
-function hostMemory() {
-  if (process.platform === "win32") return windowsHostMemory();
-  if (process.platform === "linux") return linuxHostMemory();
-  if (process.platform === "darwin") return macHostMemory();
-  throw new Error(`Unsupported operating system: ${process.platform}`);
 }
 
 function riskLevel(commitPercent, physicalPercent, memoryGiB, processCount) {
@@ -355,8 +235,20 @@ function riskLevel(commitPercent, physicalPercent, memoryGiB, processCount) {
   return "HEALTHY";
 }
 
+const severity = ["HEALTHY", "ELEVATED", "HIGH", "CRITICAL"];
+const higherRisk = (...levels) => severity[Math.max(...levels.map((level) => severity.indexOf(level)))];
+
+function classifyHostMemory(host) {
+  const physicalPercent = host.totalBytes > 0 ? (host.totalBytes - host.freeBytes) / host.totalBytes * 100 : null;
+  const commitPercent = host.commitLimitEnforced === true && host.commitLimitBytes > 0 && host.committedBytes != null
+    ? host.committedBytes / host.commitLimitBytes * 100 : null;
+  const physicalRisk = host.memoryPressure || riskLevel(null, physicalPercent, 0, 0);
+  return higherRisk(physicalRisk, riskLevel(commitPercent, null, 0, 0), riskLevel(null, host.cgroup?.percent, 0, 0));
+}
+
 export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {}) {
-  const rows = processTable();
+  if (!Number.isSafeInteger(appServerPid) || appServerPid < 0) throw new Error("appServerPid must be a non-negative integer.");
+  const { rows, warnings: processWarnings } = processTable();
   const { byPid } = indexProcesses(rows);
   let servers = topLevelAppServers(rows);
   if (Number(appServerPid) > 0) {
@@ -387,6 +279,7 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
       AppServerPid: Number(server.pid),
       ParentName: byPid.get(Number(server.ppid))?.name || null,
       StartedAt: server.startedAt || null,
+      StartIdentity: server.startIdentity || server.startedAt || null,
       ProcessCount: tree.length,
       MemoryMetric: memoryMetric,
       MemoryGiB: gib(measuredBytes),
@@ -402,9 +295,9 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
   const physicalPercent =
     host.totalBytes > 0 ? round((physicalUsedBytes / host.totalBytes) * 100, 1) : 0;
   const commitPercent =
-    host.commitLimitBytes > 0
+    host.commitLimitBytes > 0 && host.committedBytes != null
       ? round((host.committedBytes / host.commitLimitBytes) * 100, 1)
-      : 0;
+      : null;
   const processCount = appServers.reduce((total, item) => total + item.ProcessCount, 0);
   const measuredGiB = round(
     appServers.reduce((total, item) => total + item.MemoryGiB, 0),
@@ -416,43 +309,95 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
     process.platform === "win32"
       ? round(appServers.reduce((total, item) => total + item.PrivateMemoryGiB, 0))
       : null;
-  const level = riskLevel(commitPercent, physicalPercent, measuredGiB, processCount);
+  const hostLevel = classifyHostMemory(host);
+  const observedCodexLevel = riskLevel(null, null, measuredGiB, processCount);
+  const codexLevel = processWarnings.length && observedCodexLevel === "HEALTHY" ? "UNKNOWN" : observedCodexLevel;
+  const level = higherRisk(hostLevel, codexLevel);
   const reasons = [];
-  if (commitPercent >= 80) reasons.push(`Commit usage is ${commitPercent} percent.`);
-  if (physicalPercent >= 80) reasons.push(`Physical memory usage is ${physicalPercent} percent.`);
+  if (host.commitLimitEnforced === true && commitPercent >= 80) reasons.push(`Enforced commit usage is ${commitPercent} percent.`);
+  if (physicalPercent >= 80) reasons.push(`Physical memory usage is ${physicalPercent} percent (${host.availabilityKind}).`);
+  if (host.cgroup?.percent >= 80) reasons.push(`A visible cgroup memory limit is ${round(host.cgroup.percent, 1)} percent used.`);
+  if (host.memoryPressure && host.memoryPressure !== "HEALTHY") reasons.push(`The operating system reports ${host.memoryPressure} memory pressure.`);
   if (measuredGiB >= 4) reasons.push(`Codex app-server trees use ${measuredGiB} GiB of ${memoryMetric}.`);
   if (processCount >= 100) reasons.push(`Codex app-server trees contain ${processCount} processes.`);
   if (!appServers.length) reasons.push("No Codex app-server was found.");
 
-  const recommendations = {
-    CRITICAL: "Checkpoint active work and run explicit recovery as soon as active work can stop.",
-    HIGH: "Stop unnecessary delegation and prepare explicit recovery.",
-    ELEVATED: "Audit child agents and measure whether memory returns to baseline.",
-    HEALTHY: "No pressure threshold was crossed; keep housekeeping read-only.",
-  };
+  const recommendations = [];
+  if (hostLevel !== "HEALTHY") {
+    recommendations.push(
+      "Inspect the top system consumers before choosing a recovery target; host pressure alone does not identify Codex as the cause.",
+    );
+    if (!appServers.length) {
+      recommendations.push("No Codex app-server was found; no supported app-server recovery target is available.");
+    }
+  }
+  if (codexLevel === "HIGH" || codexLevel === "CRITICAL") {
+    recommendations.push(
+      "Stop unnecessary delegation and checkpoint active work. Consider recovery of one verified Codex tree only after explicit approval.",
+    );
+  } else if (codexLevel === "ELEVATED") {
+    recommendations.push("Audit child agents and measure whether their memory returns to baseline.");
+  }
+  if (level === "HEALTHY") {
+    recommendations.push("No pressure threshold was crossed; keep housekeeping read-only.");
+  }
+
+  const topProcesses = topMemoryConsumers(rows);
+  const collectionWarnings = [...processWarnings, ...host.warnings];
+  if (process.platform === "win32") {
+    const services = windowsServices();
+    if (services === null) {
+      collectionWarnings.push("Windows service lookup was unavailable; service ownership is unknown.");
+    } else {
+      for (const row of topProcesses) row.Services = services.get(row.Pid) || [];
+    }
+  }
 
   return {
-    SchemaVersion: "2.0",
+    SchemaVersion: "3.0",
     Timestamp: new Date().toISOString(),
+    Scope: appServerPid > 0 ? "selected app-server" : "all visible app-servers",
     Host: {
       Platform: process.platform,
       Architecture: process.arch,
+      MachineArchitecture: os.machine(),
+      Environment: host.environment,
+      ProcessScope: "visible operating-system processes",
+      PhysicalAvailabilityKind: host.availabilityKind,
       OS: host.os,
       OSVersion: host.osVersion,
       PhysicalTotalGiB: gib(host.totalBytes),
       PhysicalUsedGiB: gib(physicalUsedBytes),
+      PhysicalAvailableGiB: gib(host.freeBytes),
       PhysicalPercent: physicalPercent,
       CommittedGiB: host.committedBytes == null ? null : gib(host.committedBytes),
       CommitLimitGiB: host.commitLimitBytes == null ? null : gib(host.commitLimitBytes),
-      CommitPercent: host.commitLimitBytes == null ? null : commitPercent,
+      CommitAvailableGiB:
+        host.commitLimitEnforced !== true || commitPercent == null ? null : gib(Math.max(0, host.commitLimitBytes - host.committedBytes)),
+      CommitPercent: commitPercent,
+      CommitLimitEnforced: host.commitLimitEnforced,
+      OvercommitMode: host.overcommitMode ?? null,
+      OperatingSystemMemoryPressure: host.memoryPressure ?? null,
+      Cgroup: host.cgroup ? {
+        MemoryLimitGiB: gib(host.cgroup.limitBytes),
+        AvailableGiB: gib(host.cgroup.availableBytes),
+        Percent: round(host.cgroup.percent, 1),
+        Constraints: host.cgroup.constraints.map((item) => ({
+          Version: item.version,
+          LimitGiB: gib(item.limitBytes),
+          UsedGiB: gib(item.usedBytes),
+          AvailableGiB: gib(item.availableBytes),
+          Percent: round(item.percent, 1),
+        })),
+      } : null,
       SwapUsedGiB:
         host.swapTotalBytes == null
           ? null
           : gib(Math.max(0, host.swapTotalBytes - host.swapFreeBytes)),
-      CodexPackageVersion: host.packageVersion,
     },
-    Risk: { Level: level, Reasons: reasons },
+    Risk: { Level: level, HostLevel: hostLevel, CodexLevel: codexLevel, Reasons: reasons },
     Totals: {
+      ProcessScanComplete: processWarnings.length === 0,
       TopLevelAppServers: appServers.length,
       CodexProcessCount: processCount,
       MemoryMetric: memoryMetric,
@@ -461,7 +406,9 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
       PrivateMemoryGiB: privateGiB,
     },
     AppServers: appServers,
-    Recommendations: [recommendations[level]],
+    TopProcesses: topProcesses,
+    CollectionWarnings: collectionWarnings,
+    Recommendations: recommendations,
     Safety: {
       ReadOnly: true,
       ProcessesTerminated: 0,
@@ -471,37 +418,52 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
 }
 
 function snapshotMemoryGiB(snapshot) {
-  return Number(
-    snapshot?.Totals?.MemoryGiB ??
-      snapshot?.Totals?.PrivateMemoryGiB ??
-      snapshot?.Totals?.WorkingSetGiB ??
-      0,
-  );
+  const totals = snapshot?.Totals;
+  if (!totals) return null;
+  return Object.hasOwn(totals, "MemoryGiB")
+    ? totals.MemoryGiB
+    : totals.PrivateMemoryGiB ?? totals.WorkingSetGiB ?? null;
+}
+
+function measurementChange(before, after) {
+  const known = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  const beforeValue = known(before) ? before : null;
+  const afterValue = known(after) ? after : null;
+  return {
+    Before: beforeValue,
+    After: afterValue,
+    Delta: beforeValue === null || afterValue === null ? null : round(afterValue - beforeValue),
+  };
+}
+
+function memoryChange(before, after) {
+  const change = measurementChange(before, after);
+  return {
+    ...change,
+    Reclaimed: change.Delta === null ? null : Math.max(0, -change.Delta),
+  };
 }
 
 function lightweightRecoverySnapshot(before, termination) {
   const totalBytes = os.totalmem();
-  const freeBytes = os.freemem();
-  const physicalUsedBytes = Math.max(0, totalBytes - freeBytes);
-  const completed = termination.StillRunning === 0;
+  const completed = termination.StillRunning === 0 && termination.ExcludedStillRunning === 0;
   return {
-    SchemaVersion: "2.0-recovery",
+    SchemaVersion: "3.0-recovery",
     Timestamp: new Date().toISOString(),
-    Scope: "selected app-server identity after termination",
+    Scope: "selected app-server",
     Host: {
       Platform: process.platform,
       Architecture: process.arch,
       OS: `${os.type()} ${os.release()}`,
       OSVersion: os.release(),
       PhysicalTotalGiB: gib(totalBytes),
-      PhysicalUsedGiB: gib(physicalUsedBytes),
-      PhysicalPercent:
-        totalBytes > 0 ? round((physicalUsedBytes / totalBytes) * 100, 1) : 0,
+      PhysicalUsedGiB: null,
+      PhysicalAvailableGiB: null,
+      PhysicalPercent: null,
       CommittedGiB: null,
       CommitLimitGiB: null,
       CommitPercent: null,
       SwapUsedGiB: null,
-      CodexPackageVersion: before?.Host?.CodexPackageVersion || null,
     },
     Risk: {
       Level: "UNKNOWN",
@@ -531,36 +493,40 @@ function lightweightRecoverySnapshot(before, termination) {
 }
 
 export function compareSnapshots(before, after) {
-  const beforeMemory = snapshotMemoryGiB(before);
-  const afterMemory = snapshotMemoryGiB(after);
-  const beforePhysical = Number(before?.Host?.PhysicalUsedGiB || 0);
-  const afterPhysical = Number(after?.Host?.PhysicalUsedGiB || 0);
+  const beforeMetric = before?.Totals?.MemoryMetric || null;
+  const afterMetric = after?.Totals?.MemoryMetric || null;
+  const memory = memoryChange(snapshotMemoryGiB(before), snapshotMemoryGiB(after));
+  const complete = before?.Totals?.ProcessScanComplete !== false && after?.Totals?.ProcessScanComplete !== false;
+  const sameHostKind = !before?.Host?.Platform || !after?.Host?.Platform || before.Host.Platform === after.Host.Platform;
+  const sameScope = !before.Scope || !after.Scope || before.Scope === after.Scope;
+  const comparable = complete && sameHostKind && sameScope && (!beforeMetric || !afterMetric || beforeMetric === afterMetric);
+  const counts = measurementChange(before?.Totals?.CodexProcessCount, after?.Totals?.CodexProcessCount);
+  if (!complete || !sameHostKind || !sameScope) counts.Delta = null;
+  if (!comparable) {
+    memory.Delta = null;
+    memory.Reclaimed = null;
+  }
+  const physical = memoryChange(before?.Host?.PhysicalUsedGiB, after?.Host?.PhysicalUsedGiB);
+  const committed = memoryChange(before?.Host?.CommittedGiB, after?.Host?.CommittedGiB);
+  if (!sameHostKind) {
+    for (const change of [physical, committed]) {
+      change.Delta = null;
+      change.Reclaimed = null;
+    }
+  }
   return {
-    SchemaVersion: "1.0",
+    SchemaVersion: "1.1",
     BeforeTimestamp: before.Timestamp,
     AfterTimestamp: after.Timestamp,
     Platform: after?.Host?.Platform || before?.Host?.Platform || "unknown",
     Architecture: after?.Host?.Architecture || before?.Host?.Architecture || "unknown",
-    CodexProcessCount: {
-      Before: Number(before?.Totals?.CodexProcessCount || 0),
-      After: Number(after?.Totals?.CodexProcessCount || 0),
-      Delta:
-        Number(after?.Totals?.CodexProcessCount || 0) -
-        Number(before?.Totals?.CodexProcessCount || 0),
-    },
+    CodexProcessCount: counts,
     CodexMemoryGiB: {
-      Metric: after?.Totals?.MemoryMetric || before?.Totals?.MemoryMetric || "unknown",
-      Before: beforeMemory,
-      After: afterMemory,
-      Delta: round(afterMemory - beforeMemory),
-      Reclaimed: round(Math.max(0, beforeMemory - afterMemory)),
+      Metric: comparable ? afterMetric || beforeMetric || "unknown" : "incomparable",
+      ...memory,
     },
-    PhysicalUsedGiB: {
-      Before: beforePhysical,
-      After: afterPhysical,
-      Delta: round(afterPhysical - beforePhysical),
-      Reclaimed: round(Math.max(0, beforePhysical - afterPhysical)),
-    },
+    PhysicalUsedGiB: physical,
+    CommittedGiB: committed,
   };
 }
 
@@ -630,29 +596,80 @@ function spawnRecoveryWorker(workerArguments) {
   return pid;
 }
 
+function positivePid(value) {
+  if (!/^[1-9]\d*$/.test(String(value || "")) || !Number.isSafeInteger(Number(value))) {
+    throw new Error("--app-server-pid requires an explicit positive integer PID.");
+  }
+  return Number(value);
+}
+
 function parseArguments(argv) {
   const parsed = { _: [] };
+  const booleans = new Set(["json", "yes", "foreground", "help", "version", "internal-test-mode"]);
+  const values = new Set(["app-server-pid", "output", "before", "after", "output-dir", "thread-id", "id", "delay-seconds", "settle-seconds", "start-identity"]);
   for (let index = 0; index < argv.length; index += 1) {
-    const value = argv[index];
-    if (!value.startsWith("--")) {
+    const value = argv[index] === "-h" ? "--help" : argv[index] === "-v" ? "--version" : argv[index];
+    if (!value.startsWith("-")) {
       parsed._.push(value);
       continue;
     }
-    const key = value.slice(2);
-    if (
-      ["json", "yes", "foreground", "help", "internal-test-mode"].includes(key)
-    ) {
+    if (!value.startsWith("--")) throw new Error(`Unknown option: ${value}`);
+    const equals = value.indexOf("=");
+    const key = value.slice(2, equals < 0 ? undefined : equals);
+    if (!booleans.has(key) && !values.has(key)) throw new Error(`Unknown option: --${key}`);
+    if (Object.hasOwn(parsed, key)) throw new Error(`Duplicate option: --${key}`);
+    if (booleans.has(key)) {
+      if (equals >= 0) throw new Error(`--${key} does not accept a value.`);
       parsed[key] = true;
       continue;
     }
-    const next = argv[index + 1];
-    if (next == null || next.startsWith("--")) {
-      throw new Error(`Missing value for --${key}.`);
-    }
+    const next = equals < 0 ? argv[++index] : value.slice(equals + 1);
+    if (!next || next.startsWith("--")) throw new Error(`Missing value for --${key}.`);
     parsed[key] = next;
-    index += 1;
+  }
+  if (parsed._.length > 1) throw new Error("Only one subcommand is accepted; unexpected positional argument.");
+  const allowed = {
+    doctor: ["json"],
+    snapshot: ["app-server-pid", "output", "json"],
+    compare: ["before", "after", "json"],
+    recover: ["app-server-pid", "output-dir", "thread-id", "yes", "id", "delay-seconds", "settle-seconds", "foreground"],
+    "__recover-worker": ["app-server-pid", "output-dir", "id", "delay-seconds", "settle-seconds", "start-identity"],
+  };
+  const command = parsed._[0];
+  if (command && !allowed[command]) throw new Error(`Unknown command: ${command}`);
+  for (const key of Object.keys(parsed)) {
+    if (["_", "help", "version", "internal-test-mode"].includes(key)) continue;
+    if (!allowed[command]?.includes(key)) throw new Error(`--${key} is not valid for ${command || "the root command"}.`);
+  }
+  if (parsed["app-server-pid"] !== undefined) positivePid(parsed["app-server-pid"]);
+  for (const [key, minimum] of [["delay-seconds", 5], ["settle-seconds", 1]]) {
+    if (parsed[key] !== undefined && (!Number.isFinite(Number(parsed[key])) || Number(parsed[key]) < minimum || Number(parsed[key]) > 3600)) {
+      throw new Error(`--${key} must be between ${minimum} and 3600 seconds.`);
+    }
+  }
+  if (parsed.id !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,100}$/.test(parsed.id)) {
+    throw new Error("--id must be a filename-safe recovery identifier.");
   }
   return parsed;
+}
+
+function doctor() {
+  const support = platformSupport();
+  if (!support.SnapshotSupported) return { ...support, Status: "unsupported", RecoverySupported: false };
+  try {
+    const snapshot = createSnapshot();
+    return {
+      ...support,
+      Status: snapshot.Totals.ProcessScanComplete ? "ready" : "partial",
+      RecoverySupported: snapshot.Totals.ProcessScanComplete,
+      RecoveryRequiresApproval: true,
+      AppServerTargets: snapshot.AppServers.length,
+      Host: snapshot.Host,
+      Warnings: snapshot.CollectionWarnings,
+    };
+  } catch (error) {
+    return { ...support, Status: "unavailable", RecoverySupported: false, Error: error.message };
+  }
 }
 
 function printSnapshot(report, json) {
@@ -662,34 +679,49 @@ function printSnapshot(report, json) {
   }
   console.log(`RAM Raccoon: ${report.Risk.Level}`);
   console.log(`Platform: ${report.Host.Platform}/${report.Host.Architecture}`);
+  console.log(`Scope: ${report.Host.Environment}; ${report.Host.ProcessScope}`);
   console.log(
     `Physical: ${report.Host.PhysicalUsedGiB}/${report.Host.PhysicalTotalGiB} GiB (${report.Host.PhysicalPercent}%)`,
   );
-  console.log(
-    `Codex tree: ${report.Totals.CodexProcessCount} processes / ${report.Totals.MemoryGiB} GiB ${report.Totals.MemoryMetric}`,
-  );
-}
-
-function sameProcessIdentity(actual, expectedStartedAt) {
-  if (!actual || !isAppServer(actual)) return false;
-  if (!expectedStartedAt || !actual.startedAt) return false;
-  return actual.startedAt === expectedStartedAt;
-}
-
-function isAlive(pid) {
-  try {
-    process.kill(Number(pid), 0);
-    return true;
-  } catch {
-    return false;
+  console.log(`Available RAM: ${report.Host.PhysicalAvailableGiB} GiB (${report.Host.PhysicalAvailabilityKind})`);
+  if (report.Host.CommitPercent != null) {
+    console.log(
+      report.Host.CommitLimitEnforced
+        ? `Commit: ${report.Host.CommittedGiB}/${report.Host.CommitLimitGiB} GiB (${report.Host.CommitPercent}%); available ${report.Host.CommitAvailableGiB} GiB`
+        : `Commit accounting: ${report.Host.CommittedGiB}/${report.Host.CommitLimitGiB} GiB (${report.Host.CommitLimitEnforced === false ? "limit not enforced" : "enforcement unknown"}; not used as an exhaustion threshold)`,
+    );
+  } else {
+    console.log("Commit: unavailable");
   }
+  if (report.Host.Cgroup) {
+    console.log(`Cgroup: smallest visible limit ${report.Host.Cgroup.MemoryLimitGiB} GiB; headroom ${report.Host.Cgroup.AvailableGiB} GiB; peak constraint usage ${report.Host.Cgroup.Percent}%`);
+  }
+  console.log(`Pressure: host ${report.Risk.HostLevel}; Codex app-server ${report.Risk.CodexLevel}`);
+  console.log(
+    `Codex app-server trees: ${report.Totals.CodexProcessCount} processes / ${report.Totals.MemoryGiB} GiB ${report.Totals.MemoryMetric}`,
+  );
+  console.log("Top system consumers (private bytes are not resident RAM):");
+  for (const row of report.TopProcesses) {
+    const services = row.Services?.map((service) => `${service.Name} (${service.DisplayName})`).join(", ");
+    console.log(
+      `  ${row.Pid} ${row.Name}: ${row.MemoryGiB} GiB ${row.MemoryMetric}; ${row.WorkingSetGiB} GiB resident${services ? `; ${services}` : ""}`,
+    );
+  }
+  for (const warning of report.CollectionWarnings) console.log(`Warning: ${warning}`);
+  for (const recommendation of report.Recommendations) console.log(`Next: ${recommendation}`);
 }
 
-async function terminateVerifiedTree(targetPid, expectedStartedAt, onPlan = () => {}) {
-  const rows = processTable();
+function sameProcessIdentity(actual, expectedIdentity) {
+  return Boolean(actual && expectedIdentity && (actual.startIdentity || actual.startedAt) === expectedIdentity);
+}
+
+
+async function terminateVerifiedTree(targetPid, expectedIdentity, onPlan = () => {}) {
+  const { rows, warnings } = processTable();
+  if (warnings.length) throw new Error("Recovery refused: the process scan is incomplete.");
   const { byPid } = indexProcesses(rows);
   const target = byPid.get(Number(targetPid));
-  if (!sameProcessIdentity(target, expectedStartedAt)) {
+  if (!isAppServer(target) || !sameProcessIdentity(target, expectedIdentity)) {
     throw new Error("Recovery refused: the app-server PID or start identity changed.");
   }
   if (
@@ -703,7 +735,8 @@ async function terminateVerifiedTree(targetPid, expectedStartedAt, onPlan = () =
     "windowsterminal.exe",
     "csrss.exe",
   ]);
-  const eligible = processDepths(rows, targetPid)
+  const family = processDepths(rows, targetPid);
+  const eligible = family
     .filter((item) => item.pid !== process.pid)
     .filter((item) => {
       if (process.platform !== "win32") return true;
@@ -716,6 +749,9 @@ async function terminateVerifiedTree(targetPid, expectedStartedAt, onPlan = () =
       .filter((item) => item.pid !== Number(targetPid))
       .sort((a, b) => b.depth - a.depth),
   ];
+  if (ordered.some((item) => !(byPid.get(item.pid)?.startIdentity || byPid.get(item.pid)?.startedAt))) {
+    throw new Error("Recovery refused: a descendant has no verifiable start identity.");
+  }
   onPlan(
     ordered.map((item) => ({
       Pid: item.pid,
@@ -753,8 +789,12 @@ async function terminateVerifiedTree(targetPid, expectedStartedAt, onPlan = () =
       }
     }
     await sleep(2500);
+    const escalation = processTable();
+    if (escalation.warnings.length) throw new Error("Recovery stopped: the follow-up process scan is incomplete.");
+    const remaining = indexProcesses(escalation.rows).byPid;
     for (const item of ordered) {
-      if (!isAlive(item.pid)) continue;
+      const original = byPid.get(item.pid);
+      if (!sameProcessIdentity(remaining.get(item.pid), original.startIdentity || original.startedAt)) continue;
       try {
         process.kill(item.pid, "SIGKILL");
       } catch (error) {
@@ -763,10 +803,22 @@ async function terminateVerifiedTree(targetPid, expectedStartedAt, onPlan = () =
     }
   }
   await sleep(1000);
-  const alive = new Set(processTable().map((row) => Number(row.pid)));
+  const after = processTable();
+  if (after.warnings.length) throw new Error("Recovery result is unknown: the final process scan is incomplete.");
+  const remaining = indexProcesses(after.rows).byPid;
+  const selectedPids = new Set(ordered.map((item) => item.pid));
+  let stillRunning = 0;
+  let excludedStillRunning = 0;
+  for (const item of family) {
+    const original = byPid.get(item.pid);
+    if (!sameProcessIdentity(remaining.get(item.pid), original.startIdentity || original.startedAt)) continue;
+    if (selectedPids.has(item.pid)) stillRunning += 1;
+    else excludedStillRunning += 1;
+  }
   return {
     Attempted: attempted.length,
-    StillRunning: attempted.filter((pid) => alive.has(pid)).length,
+    StillRunning: stillRunning,
+    ExcludedStillRunning: excludedStillRunning,
   };
 }
 
@@ -786,7 +838,7 @@ async function recoveryWorker(options) {
 
     const termination = await terminateVerifiedTree(
       Number(options["app-server-pid"]),
-      options["started-at"],
+      options["start-identity"],
       (plan) => {
         state.TerminationPlan = plan;
         writeJsonAtomic(reportPath, state);
@@ -835,17 +887,19 @@ async function startRecovery(options) {
     throw new Error("--foreground is reserved for the controlled test suite.");
   }
 
-  const requestedPid = Number(options["app-server-pid"] || 0);
+  const requestedPid = positivePid(options["app-server-pid"]);
   const before = createSnapshot({
     appServerPid: requestedPid,
     requireTopLevel: true,
   });
+  if (!before.Totals.ProcessScanComplete) throw new Error("Recovery refused: the process scan is incomplete.");
   if (before.AppServers.length !== 1) {
     throw new Error(
       "Recovery requires exactly one target. Pass --app-server-pid from the snapshot.",
     );
   }
   const target = before.AppServers[0];
+  if (!target.StartIdentity) throw new Error("Recovery refused: the target has no verifiable start identity.");
   const outputDirectory = path.resolve(
     options["output-dir"] || path.join(process.cwd(), ".ramraccoon"),
   );
@@ -870,6 +924,7 @@ async function startRecovery(options) {
     Target: {
       AppServerPid: target.AppServerPid,
       StartedAt: target.StartedAt,
+      StartIdentity: target.StartIdentity,
       ProcessCount: target.ProcessCount,
       MemoryMetric: target.MemoryMetric,
       MemoryGiB: target.MemoryGiB,
@@ -886,7 +941,7 @@ async function startRecovery(options) {
   const workerOptions = {
     _: ["__recover-worker"],
     "app-server-pid": String(target.AppServerPid),
-    "started-at": target.StartedAt,
+    "start-identity": target.StartIdentity,
     "output-dir": outputDirectory,
     id,
     "delay-seconds": String(delaySeconds),
@@ -902,8 +957,8 @@ async function startRecovery(options) {
     "__recover-worker",
     "--app-server-pid",
     String(target.AppServerPid),
-    "--started-at",
-    target.StartedAt,
+    "--start-identity",
+    target.StartIdentity,
     "--output-dir",
     outputDirectory,
     "--id",
@@ -919,7 +974,7 @@ async function startRecovery(options) {
     ...state,
     WorkerPid: workerPid,
     ReportPath: reportPath,
-    Message: `Recovery is scheduled in ${delaySeconds} seconds. This task will disconnect while the verified app-server tree restarts.`,
+    Message: `Recovery is scheduled in ${delaySeconds} seconds. This task will disconnect while the verified app-server tree stops; reopen or resume it afterward.`,
   };
 }
 
@@ -927,9 +982,15 @@ function usage() {
   return `RAM Raccoon
 
 Usage:
-  node ramraccoon.mjs snapshot [--app-server-pid PID] [--json] [--output FILE]
-  node ramraccoon.mjs compare --before FILE --after FILE [--json]
-  node ramraccoon.mjs recover --app-server-pid PID --output-dir DIR [--thread-id ID] --yes
+  ramraccoon doctor [--json]
+  ramraccoon snapshot [--app-server-pid PID] [--json] [--output FILE]
+  ramraccoon compare --before FILE --after FILE [--json]
+  ramraccoon recover --app-server-pid PID --output-dir DIR [--thread-id ID] --yes
+  ramraccoon --version
+
+Snapshot and doctor are local and read-only. Native collectors: Windows,
+macOS, Linux. Run inside WSL/containers to inspect that guest, not its host.
+From a checkout: node skills/ramraccoon/scripts/ramraccoon.mjs <command>
 
 Recovery is destructive to the selected live runtime. Checkpoint first. The
 worker re-verifies the exact PID and start identity, terminates only that
@@ -940,14 +1001,33 @@ app-server process tree, then writes a measured before/after report.
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   const command = options._[0];
+  if (options.version) {
+    console.log(VERSION);
+    return;
+  }
   if (!command || options.help) {
     process.stdout.write(usage());
     return;
   }
 
+  if (command === "doctor") {
+    const report = doctor();
+    if (options.json) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(`RAM Raccoon doctor: ${report.Status}`);
+      console.log(`${report.Platform}/${report.Architecture}, machine ${report.MachineArchitecture}, Node ${report.NodeVersion}`);
+      console.log(report.Scope);
+      if (report.Error) console.log(report.Error);
+      for (const warning of report.Warnings || []) console.log(`Warning: ${warning}`);
+      if (!report.SnapshotSupported) console.log("Use a Windows, macOS, or Linux host. Mobile/browser sandboxes are not native collection targets.");
+    }
+    if (report.Status !== "ready") process.exitCode = 2;
+    return;
+  }
+
   if (command === "snapshot") {
     const report = createSnapshot({
-      appServerPid: Number(options["app-server-pid"] || 0),
+      appServerPid: options["app-server-pid"] === undefined ? 0 : positivePid(options["app-server-pid"]),
     });
     if (options.output) writeJsonAtomic(path.resolve(options.output), report);
     printSnapshot(report, options.json);
@@ -968,10 +1048,17 @@ async function main() {
     if (options.json) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     } else {
-      console.log(
-        `Codex memory: ${result.CodexMemoryGiB.Before} -> ${result.CodexMemoryGiB.After} GiB (${result.CodexMemoryGiB.Delta >= 0 ? "+" : ""}${result.CodexMemoryGiB.Delta})`,
-      );
-      console.log(`Measured reclaimed: ${result.CodexMemoryGiB.Reclaimed} GiB`);
+      for (const [label, change] of [
+        ["Codex memory", result.CodexMemoryGiB],
+        ["Physical memory", result.PhysicalUsedGiB],
+        ["System commit", result.CommittedGiB],
+      ]) {
+        const delta = change.Delta === null
+          ? "unknown"
+          : `${change.Delta >= 0 ? "+" : ""}${change.Delta}`;
+        console.log(`${label}: ${change.Before ?? "unknown"} -> ${change.After ?? "unknown"} GiB (${delta})`);
+      }
+      console.log(`Measured Codex reduction: ${result.CodexMemoryGiB.Reclaimed ?? "unknown"} GiB`);
     }
     return;
   }
@@ -989,8 +1076,7 @@ async function main() {
   throw new Error(`Unknown command: ${command}`);
 }
 
-const isMain =
-  process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+const isMain = process.argv[1] && existsSync(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(SCRIPT_PATH);
 if (isMain) {
   main().catch((error) => {
     console.error(`RAM Raccoon error: ${error.message}`);
@@ -999,8 +1085,12 @@ if (isMain) {
 }
 
 export {
+  classifyHostMemory,
+  lightweightRecoverySnapshot,
+  sameProcessIdentity,
   descendants,
   isAppServer,
   riskLevel,
+  topMemoryConsumers,
   topLevelAppServers,
 };

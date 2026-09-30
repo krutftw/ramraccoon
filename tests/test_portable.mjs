@@ -46,8 +46,37 @@ test("comparison reports raw values, delta, and reclaimed memory", () => {
     Totals: { CodexProcessCount: 20, MemoryMetric: "summed RSS", MemoryGiB: 2 },
   };
   const result = compareSnapshots(before, after);
-  assert.equal(result.Architecture, "arm64");
   assert.equal(result.CodexMemoryGiB.Delta, -6);
   assert.equal(result.CodexMemoryGiB.Reclaimed, 6);
   assert.equal(result.PhysicalUsedGiB.Reclaimed, 6);
+});
+
+test("an app-server mention in a prompt or configuration is not a server", () => {
+  for (const args of [
+    "codex exec app-server",
+    'codex -c prompt=app-server exec',
+    'codex --config=prompt=app-server resume',
+    'codex exec "please inspect app-server"',
+  ]) {
+    assert.equal(isAppServer({ name: "codex", args }), false, args);
+  }
+  assert.equal(isAppServer({ name: "codex", args: "codex -c features.multi_agent=true app-server --stdio" }), true);
+  assert.equal(isAppServer({
+    name: "codex.exe", args: '"C:\\Program Files\\Codex\\codex.exe" app-server --stdio',
+  }), true);
+});
+
+test("Linux argv and macOS executable paths preserve actual subcommand boundaries", () => {
+  assert.equal(isAppServer({ name: "codex", argv: ["codex", "exec", "app-server"], args: "" }), false);
+  assert.equal(isAppServer({
+    name: "codex", executable: "/Applications/Codex Beta.app/codex",
+    args: "/Applications/Codex Beta.app/codex app-server --stdio",
+  }), true);
+});
+
+test("process-tree cycles are bounded and unrelated siblings stay outside the tree", () => {
+  const cycle = [
+    { pid: 1, ppid: 3 }, { pid: 2, ppid: 1 }, { pid: 3, ppid: 2 }, { pid: 4, ppid: 0 },
+  ];
+  assert.deepEqual(descendants(cycle, 1).map((row) => row.pid), [1, 2, 3]);
 });

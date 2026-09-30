@@ -1,10 +1,10 @@
 interface:
   display_name: "RAM Raccoon"
-  short_description: "Audit agents and recover runaway memory"
+  short_description: "Diagnose memory pressure and audit agents"
   icon_small: "./assets/ramraccoon-mark.svg"
   icon_large: "./assets/ramraccoon-mark.svg"
   brand_color: "#E2552D"
-  default_prompt: "Use $ramraccoon to decide which agents are still needed, check Codex memory pressure, and prepare explicit recovery when required."
+  default_prompt: "Use $ramraccoon to check system memory and top consumers, audit available Codex agents, and propose checkpointed recovery only when a measured app-server footprint justifies it. Keep checks read-only."
 
 policy:
   allow_implicit_invocation: true

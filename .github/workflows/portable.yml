@@ -8,36 +8,92 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: portable-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   portable:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name }} / Node ${{ matrix.node }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Linux x64
             runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            node: "22"
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            node: "22"
           - name: macOS ARM64
-            runner: macos-14
+            runner: macos-15
+            platform: darwin
+            arch: arm64
+            node: "22"
           - name: macOS Intel
             runner: macos-15-intel
+            platform: darwin
+            arch: x64
+            node: "22"
           - name: Windows x64
             runner: windows-2025
+            platform: win32
+            arch: x64
+            node: "22"
           - name: Windows ARM64
             runner: windows-11-arm
+            platform: win32
+            arch: arm64
+            node: "22"
+          - name: Linux minimum runtime
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            node: "20"
+          - name: Linux current LTS
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            node: "24"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - name: Runtime identity
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          architecture: ${{ matrix.arch }}
+      - name: Verify native runtime identity
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.platform }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: node -e "if(process.platform!==process.env.EXPECTED_PLATFORM || process.arch!==process.env.EXPECTED_ARCH) process.exit(1); console.log({platform:process.platform,arch:process.arch,node:process.version})"
+      - name: Behavior regressions
+        run: npm test
+      - name: Live scoped snapshot and doctor
+        run: npm run test:live
+      - name: Controlled recovery with unrelated survivor
+        run: npm run test:recovery
+      - name: Package contents
+        run: npm pack --dry-run
+
+  linux-container:
+    name: Linux Alpine / cgroup limit / offline runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Exercise minimal Linux without ps or external network
         run: |
-          node --version
-          node -e "console.log('platform=' + process.platform + ' arch=' + process.arch)"
-      - name: Portable contracts
-        run: node --test tests/test_portable.mjs
-      - name: Platform snapshot
-        run: node skills/ramraccoon/scripts/ramraccoon.mjs snapshot --json
-      - name: Controlled recovery engine
-        run: node tests/Test-RamRaccoonRecovery.mjs
+          docker pull node:22-alpine
+          docker run --rm --network=none --memory=384m --memory-swap=384m --pids-limit=128 --env PATH=/usr/local/bin -v "$GITHUB_WORKSPACE:/work:ro" -w /work node:22-alpine node --input-type=module -e 'import {createSnapshot} from "./skills/ramraccoon/scripts/ramraccoon.mjs"; const cgroup=createSnapshot().Host.Cgroup; if(cgroup?.MemoryLimitGiB !== 0.38) throw new Error("Expected the 384 MiB cgroup limit"); console.log(JSON.stringify(cgroup));'
+          docker run --rm --network=none --memory=384m --memory-swap=384m --pids-limit=128 --env PATH=/usr/local/bin -v "$GITHUB_WORKSPACE:/work:ro" -w /work node:22-alpine node tests/Test-RamRaccoonLive.mjs
+          docker run --rm --network=none --memory=384m --memory-swap=384m --pids-limit=128 --env PATH=/usr/local/bin -v "$GITHUB_WORKSPACE:/work:ro" -w /work node:22-alpine node tests/Test-RamRaccoonRecovery.mjs

@@ -1,0 +1,33 @@
+{
+  "RecordedAt": "2026-09-30T07:26:17.119627+00:00",
+  "Version": "0.4.0",
+  "Platform": "win32",
+  "Architecture": "x64",
+  "NodeVersion": "24.11.1",
+  "RegressionTests": {
+    "Passed": 42,
+    "Failed": 0,
+    "Skipped": 0
+  },
+  "LiveDiagnostics": {
+    "Result": "PASSED",
+    "FixtureProcesses": 2,
+    "FixtureSurvivedSnapshot": true,
+    "PrivateArgumentsEmitted": false,
+    "MemoryMetric": "private bytes",
+    "DoctorStatus": "ready"
+  },
+  "ControlledRecovery": {
+    "Result": "PASSED",
+    "TargetType": "controlled fixture, not a Codex runtime",
+    "SelectedProcesses": 2,
+    "RemainingTargetProcesses": 0,
+    "UnrelatedFixtureSurvived": true,
+    "ObservedTargetReductionGiB": 0.08,
+    "FullPostResumeBaselineRequired": true
+  },
+  "NativePlatformLimitations": [
+    "No current native macOS, Linux, ARM64, WSL, or container run",
+    "Hosted Actions jobs blocked by account billing lock; parser tests are not native validation"
+  ]
+}
