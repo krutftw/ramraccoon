@@ -537,6 +537,25 @@ function writeJsonAtomic(file, value) {
   renameSync(temporary, file);
 }
 
+function readSnapshotFile(file) {
+  if (!existsSync(file)) throw new Error(`Snapshot does not exist: ${file}`);
+  const bytes = readFileSync(file);
+  // Windows PowerShell 5.1 saves `>` output as UTF-16LE, and its UTF-8 files start with a BOM.
+  const text = bytes[0] === 0xff && bytes[1] === 0xfe
+    ? bytes.subarray(2).toString("utf16le")
+    : bytes.toString("utf8").replace(/^\uFEFF/, "");
+  let report;
+  try {
+    report = JSON.parse(text);
+  } catch {
+    throw new Error(`Snapshot is not valid JSON: ${file}`);
+  }
+  if (!report || typeof report !== "object" || Array.isArray(report)) {
+    throw new Error(`Snapshot is not a RAM Raccoon report: ${file}`);
+  }
+  return report;
+}
+
 function quoteWindowsArgument(value) {
   const text = String(value);
   if (text && !/[\s"]/u.test(text)) return text;
@@ -1040,13 +1059,7 @@ async function main() {
     if (!options.before || !options.after) {
       throw new Error("compare requires --before and --after.");
     }
-    for (const file of [options.before, options.after]) {
-      if (!existsSync(file)) throw new Error(`Snapshot does not exist: ${file}`);
-    }
-    const result = compareSnapshots(
-      JSON.parse(readFileSync(options.before, "utf8")),
-      JSON.parse(readFileSync(options.after, "utf8")),
-    );
+    const result = compareSnapshots(readSnapshotFile(options.before), readSnapshotFile(options.after));
     if (options.json) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     } else {
