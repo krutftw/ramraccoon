@@ -9,19 +9,20 @@ Local environment: Windows 11 Pro 10.0.26100, x64 Node 24.11.1.
 
 | Check | Observed result |
 |---|---|
-| `npm test` | 42 passed; 0 failed, skipped, or cancelled |
+| `npm test` | 45 passed; 0 failed, skipped, or cancelled |
 | `npm run test:live` | Two owned fixture processes detected; both survived the read-only snapshot; private arguments not emitted; doctor ready |
-| `npm run test:recovery` | Two selected fixture processes became zero; unrelated fixture survived; detached worker wrote its result |
+| `npm run test:recovery` | Two selected fixture processes became zero; unrelated fixture survived; detached worker had no visible console window and wrote its result |
 | Controlled target private memory | Observed decrease of 0.08 GiB; not a claim of host RAM released |
 | Packed distribution | `npm pack` included both runtime modules, skill, metadata, and assets; no bundled runtime dependencies |
 | Offline local package install | Installed the packed tarball with `--offline --ignore-scripts --no-audit --no-fund` into a temporary prefix |
-| Installed CLI shim | `ramraccoon --version` returned 0.4.0; `ramraccoon doctor --json` returned ready on the actual Windows host |
-| Clean public skill install | `npx skills add krutftw/ramraccoon -a codex -s ramraccoon -y --copy` installed the published skill in an empty temporary project; its version was 0.4.0 and doctor returned ready |
+| Installed CLI shim | `ramraccoon --version` returned 0.4.1; `ramraccoon doctor --json` returned ready on the actual Windows host |
+| Clean public skill install | `npx skills add krutftw/ramraccoon -a codex -s ramraccoon -y --copy` installed the published skill in an empty temporary project; its version was 0.4.1 and doctor returned ready |
 | Real Codex termination | Not performed or claimed |
 | Native macOS/Linux/ARM64/WSL/container execution | Not available for this revision; not claimed |
 
 The compact sanitized record is
-[`windows-v0.4.0-controlled-validation.json`](../evidence/windows-v0.4.0-controlled-validation.json).
+[`windows-v0.4.1-controlled-validation.json`](../evidence/windows-v0.4.1-controlled-validation.json);
+the [v0.4.0 record](../evidence/windows-v0.4.0-controlled-validation.json) is retained.
 Tests created their own targets and removed their temporary fixtures; they did
 not select a user's Codex PID. The ordinary installed CLI doctor also ran
 against the actual host without terminating its detected app-servers.
@@ -31,6 +32,12 @@ descendants still survived. It failed before the fix and passed afterward.
 The worker now reports excluded survivors separately and does not invent zero
 Codex memory for that case. Physical/commit after readings in the lightweight
 worker sample remain `null`; a normal post-resume snapshot is still required.
+
+v0.4.1 adds checks for three defects found after v0.4.0, each reproduced before
+its fix: the Windows recovery worker opened a visible console window, and
+closing it would end the worker mid-recovery; `compare` rejected snapshots
+saved by Windows PowerShell 5.1 redirection; and an incomplete process scan
+with no crossed threshold reported an overall `HEALTHY`.
 
 ## Recorded recovery images
 
@@ -75,6 +82,11 @@ The full post-resume baseline remains required for a real recovery.
 - Missing after-readings remain unknown; they do not become 100% recovery.
 - Memory growth, valid zero measurements, mixed metrics, partial process scans,
   OS mismatches, and selection-scope mismatches have distinct outcomes.
+- An incomplete process scan with no crossed threshold reports `UNKNOWN`, not
+  `HEALTHY`.
+- `compare` reads snapshots saved as UTF-16LE by Windows PowerShell 5.1
+  redirection or with a UTF-8 byte-order mark, and names a snapshot file it
+  cannot use.
 - Process names or an `app-server` string in a prompt/config value do not alone
   identify a recovery target. Paths with spaces and cyclic ancestry are covered.
 - Linux overcommit modes 0/1 do not use `Committed_AS / CommitLimit` as enforced
@@ -133,8 +145,10 @@ on an ARM machine does not count as native ARM validation.
 
 ### Current external blocker
 
-The [v0.4 push's Actions run](https://github.com/krutftw/ramraccoon/actions/runs/36684952519)
-failed before any of its nine jobs started. Every job annotation said:
+The [v0.4.1 push's Actions run](https://github.com/krutftw/ramraccoon/actions/runs/38457601615)
+failed before any of its nine jobs started, as did the
+[v0.4.0 push's run](https://github.com/krutftw/ramraccoon/actions/runs/36684952519).
+Each job carried this annotation:
 
 > The job was not started because your account is locked due to a billing issue.
 
@@ -191,9 +205,11 @@ Retained historical records from the earlier implementation:
 | [Controlled Windows recovery](../evidence/windows-2026-07-30-controlled-recovery.json) | Two fixture processes to zero; 0.07 GiB private decrease, not a real Codex recovery |
 | [Linux x64 smoke](../evidence/linux-2026-07-30-smoke.json) | Earlier schema 2.0 collector ran with Node 24.18.0 and no Codex target; not validation of the new Linux/cgroup implementation |
 
-A clean public skill install was recorded on 30 July 2026, and the v0.4 public
-install above succeeded again. The current installer displayed Gen “Safe,”
-Socket “0 alerts,” and Snyk “Low Risk,” but did not provide scan-commit
-provenance. Those labels are not treated as a fresh v0.4 audit or certification.
+A clean public skill install was recorded on 30 July 2026, and the v0.4.0 and
+v0.4.1 public installs succeeded again. The v0.4.0 installer displayed Gen
+“Safe,” Socket “0 alerts,” and Snyk “Low Risk,” but did not provide scan-commit
+provenance. The v0.4.1 install ran non-interactively and displayed no
+assessment labels. Those labels are not treated as a fresh v0.4 audit or
+certification.
 See [the capability review](./SECURITY-ASSESSMENT.md); no independent audit or
 numerical safety score is claimed.

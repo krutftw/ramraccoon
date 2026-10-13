@@ -11,7 +11,7 @@
   <a href="#before-and-after-proof">Before / after</a> ·
   <a href="#platforms-and-devices">Platforms</a> ·
   <a href="./SECURITY.md">Safety</a> ·
-  <a href="https://github.com/krutftw/ramraccoon/releases/tag/v0.4.0">Release notes</a>
+  <a href="https://github.com/krutftw/ramraccoon/releases/tag/v0.4.1">Release notes</a>
 </p>
 
 <p align="center">
@@ -217,7 +217,7 @@ exited; it is not a full post-resume host-memory sample.
 
 ## Built on evidence
 
-**42 regression tests passed on Windows x64.** Live read-only diagnostics,
+**45 regression tests passed on Windows x64.** Live read-only diagnostics,
 controlled fixture recovery (**2 target applications → 0**, unrelated fixture
 survived), and clean public installation passed. No real Codex runtime was
 terminated for these checks. Native macOS/Linux/ARM64 results remain pending.

@@ -1,0 +1,47 @@
+{
+  "RecordedAt": "2026-10-13T19:53:29.533+00:00",
+  "Version": "0.4.1",
+  "Platform": "win32",
+  "Architecture": "x64",
+  "NodeVersion": "24.11.1",
+  "RegressionTests": {
+    "Passed": 45,
+    "Failed": 0,
+    "Skipped": 0
+  },
+  "LiveDiagnostics": {
+    "Result": "PASSED",
+    "FixtureProcesses": 2,
+    "FixtureSurvivedSnapshot": true,
+    "PrivateArgumentsEmitted": false,
+    "MemoryMetric": "private bytes",
+    "DoctorStatus": "ready"
+  },
+  "ControlledRecovery": {
+    "Result": "PASSED",
+    "TargetType": "controlled fixture, not a Codex runtime",
+    "SelectedProcesses": 2,
+    "RemainingTargetProcesses": 0,
+    "UnrelatedFixtureSurvived": true,
+    "ObservedTargetReductionGiB": 0.08,
+    "FullPostResumeBaselineRequired": true
+  },
+  "Distribution": {
+    "OfflinePackedInstall": "PASSED",
+    "InstalledCliVersion": "0.4.1",
+    "InstalledCliDoctorStatus": "ready",
+    "CleanPublicSkillInstall": "PASSED",
+    "PublicSourceCommit": "709dd98e81b5b2bc294e93dcedbbdaba5944991c",
+    "PublicSkillVersion": "0.4.1",
+    "PublicSkillDoctorStatus": "ready"
+  },
+  "HostedVerification": {
+    "Run": "https://github.com/krutftw/ramraccoon/actions/runs/38457601615",
+    "JobsBlockedBeforeExecution": 9,
+    "Reason": "The job was not started because your account is locked due to a billing issue."
+  },
+  "NativePlatformLimitations": [
+    "No current native macOS, Linux, ARM64, WSL, or container run",
+    "Hosted Actions jobs blocked by account billing lock; parser tests are not native validation"
+  ]
+}

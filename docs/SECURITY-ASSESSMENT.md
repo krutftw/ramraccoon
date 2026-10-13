@@ -39,7 +39,7 @@ responsibility, fixture mode, and the limitations of recovery evidence.
 
 ## Evidence and limits
 
-The current local verification exercised 42 behavior regressions, Windows x64
+The current local verification exercised 45 behavior regressions, Windows x64
 read-only diagnostics against an owned fixture, and controlled recovery where
 two selected processes exited while an unrelated fixture survived. It did not
 terminate or claim to repair a real Codex runtime. Native macOS/Linux/ARM64 and
@@ -48,8 +48,9 @@ restricted-container results are not yet available for this release.
 See [VALIDATION.md](./VALIDATION.md) for reproducible commands, native versus
 parser-only coverage, current CI blockers, and earlier-release evidence.
 
-Both the historical installer and the current clean public install displayed
-Gen “Safe,” Socket “0 alerts,” and Snyk “Low Risk.” The current installer did not
-identify which source commit those assessments scanned. They are not treated
-as a fresh v0.4 review or certification of recovery. No current independent
+Both the historical installer and the v0.4.0 clean public install displayed
+Gen “Safe,” Socket “0 alerts,” and Snyk “Low Risk.” The v0.4.0 installer did not
+identify which source commit those assessments scanned, and the non-interactive
+v0.4.1 install displayed no labels. The labels are not treated as a fresh v0.4
+review or certification of recovery. No current independent
 audit, verified marketplace rescan, or numerical security score is claimed.
