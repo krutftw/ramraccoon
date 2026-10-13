@@ -73,7 +73,7 @@ is pending. `doctor` checks capability in the actual execution environment.
 - `TopProcesses` contains up to ten consumers ranked by Windows private bytes or macOS/Linux RSS. Several services can share a PID; memory belongs to the process, not independently to each listed service.
 - `Services: null` means unknown/not collected; `[]` means no matching running service was found. Neither means safe to stop.
 - macOS/Linux tree totals are summed RSS and may double-count shared pages.
-- `Risk.HostLevel` describes host/visible-limit pressure; `Risk.CodexLevel` describes the app-server footprint. They are separate. An incomplete scan can leave Codex status `UNKNOWN`.
+- `Risk.HostLevel` describes host/visible-limit pressure; `Risk.CodexLevel` describes the app-server footprint. They are separate. An incomplete scan can leave Codex status `UNKNOWN`; if nothing else crossed a threshold, the overall `Risk.Level` is `UNKNOWN` too.
 - `CollectionWarnings` explains missing optional counters or incomplete visibility. `Totals.ProcessScanComplete: false` blocks recovery and prevents claimed Codex reductions from missing processes.
 - No app-server does not mean Codex is closed: standalone CLI processes may still appear among top consumers. They are not recovery targets.
 

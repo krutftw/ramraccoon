@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareSnapshots, lightweightRecoverySnapshot, riskLevel, topMemoryConsumers } from "../skills/ramraccoon/scripts/ramraccoon.mjs";
+import { classifySnapshotRisk, compareSnapshots, lightweightRecoverySnapshot, riskLevel, topMemoryConsumers } from "../skills/ramraccoon/scripts/ramraccoon.mjs";
 
 const GIB = 1024 ** 3;
 
@@ -119,6 +119,14 @@ test("host pressure does not require a Codex process to cross a threshold", () =
     assert.equal(riskLevel(null, percent, 0, 0), expected);
   }
   assert.equal(riskLevel(null, null, 0, 0), "HEALTHY");
+});
+
+test("an incomplete process scan cannot make the overall report healthy", () => {
+  assert.deepEqual(classifySnapshotRisk("HEALTHY", "HEALTHY", false), { level: "UNKNOWN", codexLevel: "UNKNOWN" });
+  assert.deepEqual(classifySnapshotRisk("HIGH", "HEALTHY", false), { level: "HIGH", codexLevel: "UNKNOWN" });
+  assert.deepEqual(classifySnapshotRisk("HEALTHY", "ELEVATED", false), { level: "ELEVATED", codexLevel: "ELEVATED" });
+  assert.deepEqual(classifySnapshotRisk("ELEVATED", "HEALTHY", true), { level: "ELEVATED", codexLevel: "HEALTHY" });
+  assert.deepEqual(classifySnapshotRisk("HEALTHY", "HEALTHY", true), { level: "HEALTHY", codexLevel: "HEALTHY" });
 });
 
 test("a restricted process scan cannot claim that missing processes were freed", () => {
