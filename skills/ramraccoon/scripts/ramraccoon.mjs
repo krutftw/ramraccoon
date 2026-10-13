@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { hostMemory, platformSupport, powershellExecutable, processTable, run } from "./platform.mjs";
 
 const GIB = 1024 ** 3;
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const TEST_MODE =
   process.env.RAMRACCOON_TEST_MODE === "1" ||
