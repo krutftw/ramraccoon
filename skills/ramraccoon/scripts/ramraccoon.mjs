@@ -238,6 +238,12 @@ function riskLevel(commitPercent, physicalPercent, memoryGiB, processCount) {
 const severity = ["HEALTHY", "ELEVATED", "HIGH", "CRITICAL"];
 const higherRisk = (...levels) => severity[Math.max(...levels.map((level) => severity.indexOf(level)))];
 
+function classifySnapshotRisk(hostLevel, observedCodexLevel, processScanComplete) {
+  const codexLevel = !processScanComplete && observedCodexLevel === "HEALTHY" ? "UNKNOWN" : observedCodexLevel;
+  const knownLevel = higherRisk(hostLevel, codexLevel);
+  return { level: knownLevel === "HEALTHY" && codexLevel === "UNKNOWN" ? "UNKNOWN" : knownLevel, codexLevel };
+}
+
 function classifyHostMemory(host) {
   const physicalPercent = host.totalBytes > 0 ? (host.totalBytes - host.freeBytes) / host.totalBytes * 100 : null;
   const commitPercent = host.commitLimitEnforced === true && host.commitLimitBytes > 0 && host.committedBytes != null
@@ -310,9 +316,11 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
       ? round(appServers.reduce((total, item) => total + item.PrivateMemoryGiB, 0))
       : null;
   const hostLevel = classifyHostMemory(host);
-  const observedCodexLevel = riskLevel(null, null, measuredGiB, processCount);
-  const codexLevel = processWarnings.length && observedCodexLevel === "HEALTHY" ? "UNKNOWN" : observedCodexLevel;
-  const level = higherRisk(hostLevel, codexLevel);
+  const { level, codexLevel } = classifySnapshotRisk(
+    hostLevel,
+    riskLevel(null, null, measuredGiB, processCount),
+    processWarnings.length === 0,
+  );
   const reasons = [];
   if (host.commitLimitEnforced === true && commitPercent >= 80) reasons.push(`Enforced commit usage is ${commitPercent} percent.`);
   if (physicalPercent >= 80) reasons.push(`Physical memory usage is ${physicalPercent} percent (${host.availabilityKind}).`);
@@ -340,6 +348,8 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
   }
   if (level === "HEALTHY") {
     recommendations.push("No pressure threshold was crossed; keep housekeeping read-only.");
+  } else if (level === "UNKNOWN") {
+    recommendations.push("Some processes could not be inspected, so Codex usage is unknown. Report the missing visibility instead of treating this as healthy.");
   }
 
   const topProcesses = topMemoryConsumers(rows);
@@ -1101,6 +1111,7 @@ if (isMain) {
 
 export {
   classifyHostMemory,
+  classifySnapshotRisk,
   lightweightRecoverySnapshot,
   sameProcessIdentity,
   descendants,
