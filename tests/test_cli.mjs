@@ -60,6 +60,38 @@ test("a saved partial report stays unknown through the actual comparison CLI", (
   }
 });
 
+test("compare reads snapshots saved by Windows PowerShell redirection or with a UTF-8 BOM", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "ramraccoon-encoding-"));
+  try {
+    const before = path.join(directory, "before.json");
+    const after = path.join(directory, "after.json");
+    writeFileSync(before, Buffer.from(`\uFEFF${JSON.stringify({ Totals: { MemoryGiB: 12, MemoryMetric: "private bytes" } })}\r\n`, "utf16le"));
+    writeFileSync(after, `\uFEFF${JSON.stringify({ Totals: { MemoryGiB: 3, MemoryMetric: "private bytes" } })}`);
+    const result = invoke(["compare", "--before", before, "--after", after, "--json"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).CodexMemoryGiB.Delta, -9);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("compare names the snapshot file it cannot use", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "ramraccoon-unreadable-"));
+  try {
+    const valid = path.join(directory, "valid.json");
+    writeFileSync(valid, JSON.stringify({ Totals: { MemoryGiB: 1, MemoryMetric: "summed RSS" } }));
+    for (const [name, content] of [["truncated.json", '{"Totals": {'], ["null.json", "null"]]) {
+      const file = path.join(directory, name);
+      writeFileSync(file, content);
+      const result = invoke(["compare", "--before", file, "--after", valid]);
+      assert.equal(result.status, 1, name);
+      assert.ok(result.stderr.includes(file), result.stderr);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("a symlinked package executable actually runs the requested comparison", (t) => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "ramraccoon-entrypoint-"));
   try {
