@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { powershellExecutable, run } from "../skills/ramraccoon/scripts/platform.mjs";
 import { cli, environment, pause, startFixture, stopFixture } from "./fixture-support.mjs";
 
 const fixture = await startFixture();
@@ -13,6 +14,14 @@ try {
     "--output-dir", fixture.directory, "--id", id,
     "--delay-seconds", "5", "--settle-seconds", "1", "--yes",
   ], { env: environment, encoding: "utf8", windowsHide: true, timeout: 60000 }));
+  if (process.platform === "win32") {
+    await pause(1000);
+    const visible = run(powershellExecutable(), [
+      "-NoProfile", "-NonInteractive", "-Command",
+      `(Get-Process -Id ${scheduled.WorkerPid}).MainWindowHandle -ne [IntPtr]::Zero`,
+    ]).trim();
+    assert.equal(visible, "False", "The recovery worker opened a visible console window; closing it would kill the worker mid-recovery.");
+  }
   const reportPath = path.join(fixture.directory, `${id}-recovery.json`);
   const deadline = Date.now() + 90000;
   let report;

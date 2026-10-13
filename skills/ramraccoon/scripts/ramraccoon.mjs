@@ -572,14 +572,16 @@ function spawnRecoveryWorker(workerArguments) {
 
   // A normal detached child still belongs to the Codex Windows job object and
   // can be terminated with the app-server. WMI creates the worker outside that
-  // job so it can finish the after-snapshot and evidence report.
+  // job so it can finish the after-snapshot and evidence report. Its console
+  // must stay hidden: closing a visible one kills the worker mid-recovery.
   const commandLine = [process.execPath, ...workerArguments]
     .map(quoteWindowsArgument)
     .join(" ");
   const escaped = commandLine.replaceAll("'", "''");
   const command = [
     `$commandLine='${escaped}'`,
-    "$result=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$commandLine}",
+    "$startup=New-CimInstance -ClassName Win32_ProcessStartup -Namespace root/cimv2 -ClientOnly -Property @{ShowWindow=[uint16]0}",
+    "$result=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$commandLine; ProcessStartupInformation=$startup}",
     "if([int]$result.ReturnValue -ne 0){throw \"Win32_Process.Create failed: $($result.ReturnValue)\"}",
     "[int]$result.ProcessId",
   ].join("\n");
