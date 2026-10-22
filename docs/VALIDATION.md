@@ -20,7 +20,7 @@ defect was reproduced first; most have a regression test that fails on v0.4.1.
 | cgroup v2 limit | — | — | 384 MiB `memory.max` read as 0.38 GiB; after a 300 MiB file read, raw usage was 309 MiB with 300 MiB inactive file cache, reported as 5.9% used (v0.4.1 reported 83.8% and `ELEVATED`) |
 | Packed distribution | `npm pack`: 15 files, both runtime modules, skill, metadata, assets; no runtime dependencies | — | — |
 | Offline package install | The packed tarball installed with `--offline --ignore-scripts --no-audit --no-fund` into a temporary prefix; `ramraccoon --version` returned 0.4.2 and `doctor --json` returned ready | — | — |
-| Clean public installs | PUBLIC_INSTALL_RESULT | — | — |
+| Clean public installs | From the pushed release commit: `npm install --global --allow-git=all github:krutftw/ramraccoon` into a temporary prefix (npm 11.7 warned about the flag and installed) gave 0.4.2 with doctor ready; `npx skills add` (skills 1.7.4) installed the skill into an empty project, 0.4.2, doctor ready | — | — |
 | Real Codex termination | Not performed or claimed | Not performed or claimed | Not performed or claimed |
 
 The Linux runs used two existing local WSL2 distributions. The repository was

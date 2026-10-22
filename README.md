@@ -129,7 +129,7 @@ permission to terminate anything.
 
 ## Platforms and devices
 
-**v0.4 is a pre-release.** Windows x64, and Linux x64 under WSL2, are verified locally.
+**Verification status:** Windows x64, and Linux x64 under WSL2, are verified locally; native Linux hardware, macOS and ARM64 are not.
 Native cross-platform CI is currently [blocked by GitHub's account billing lock](./docs/VALIDATION.md#current-external-blocker),
 not a failing code test. Configured jobs are not presented as passing jobs.
 
