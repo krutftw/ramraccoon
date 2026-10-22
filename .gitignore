@@ -4,3 +4,4 @@ Thumbs.db
 *.log
 .pytest_cache/
 __pycache__/
+.ramraccoon/

@@ -5,39 +5,54 @@ are different claims. This document keeps them separate.
 
 ## Current v0.4 results
 
-Local environment: Windows 11 Pro 10.0.26100, x64 Node 24.11.1.
+v0.4.2 comes from a multi-agent review of v0.4.1: area reviewers, then three
+independent verifiers for each finding, repeated until rounds stopped finding
+new defects, then the same process over the changes themselves. Each fixed
+defect was reproduced first; most have a regression test that fails on v0.4.1.
 
-| Check | Observed result |
-|---|---|
-| `npm test` | 45 passed; 0 failed, skipped, or cancelled |
-| `npm run test:live` | Two owned fixture processes detected; both survived the read-only snapshot; private arguments not emitted; doctor ready |
-| `npm run test:recovery` | Two selected fixture processes became zero; unrelated fixture survived; detached worker had no visible console window and wrote its result |
-| Controlled target private memory | Observed decrease of 0.08 GiB; not a claim of host RAM released |
-| Packed distribution | `npm pack` included both runtime modules, skill, metadata, and assets; no bundled runtime dependencies |
-| Offline local package install | Installed the packed tarball with `--offline --ignore-scripts --no-audit --no-fund` into a temporary prefix |
-| Installed CLI shim | `ramraccoon --version` returned 0.4.1; `ramraccoon doctor --json` returned ready on the actual Windows host |
-| Clean public skill install | `npx skills add krutftw/ramraccoon -a codex -s ramraccoon -y --copy` installed the published skill in an empty temporary project; its version was 0.4.1 and doctor returned ready |
-| Real Codex termination | Not performed or claimed |
-| Native macOS/Linux/ARM64/WSL/container execution | Not available for this revision; not claimed |
+| Check | Windows 11 Pro 10.0.26100, x64, Node 24.11.1 | WSL2 Ubuntu 22.04.5, x64, Node 24.21.0 | WSL2 Alpine 3.24, x64, Node 24.18.1 |
+|---|---|---|---|
+| `npm test` | 57 passed | 56 passed, 1 Windows-only skipped | 56 passed, 1 Windows-only skipped |
+| `npm run test:live` | Passed; doctor ready; a real `codex.exe app-server` copy of Node detected from its command line | Passed; doctor ready | Passed; doctor ready |
+| `npm run test:recovery` | Passed: selected tree stopped, unrelated fixture survived, a detached survivor reported `partial`, an abandoned job left its target running; hidden-console check conclusive (classic console host) | Passed, same scenarios | Passed, same scenarios |
+| Sandbox detection | — | — | Codex-style `bwrap --unshare-pid --as-pid-1` with a helper as PID 1: `WSL guest (bubblewrap sandbox)`, scan incomplete, `UNKNOWN` |
+| Namespace init seen from outside | — | Detected through `NSpid` | Detected through `NSpid` |
+| cgroup v2 limit | — | — | 384 MiB `memory.max` read as 0.38 GiB; after a 300 MiB file read, raw usage was 309 MiB with 300 MiB inactive file cache, reported as 5.9% used (v0.4.1 reported 83.8% and `ELEVATED`) |
+| Packed distribution | `npm pack`: 15 files, both runtime modules, skill, metadata, assets; no runtime dependencies | — | — |
+| Offline package install | The packed tarball installed with `--offline --ignore-scripts --no-audit --no-fund` into a temporary prefix; `ramraccoon --version` returned 0.4.2 and `doctor --json` returned ready | — | — |
+| Clean public installs | PUBLIC_INSTALL_RESULT | — | — |
+| Real Codex termination | Not performed or claimed | Not performed or claimed | Not performed or claimed |
 
-The compact sanitized record is
-[`windows-v0.4.1-controlled-validation.json`](../evidence/windows-v0.4.1-controlled-validation.json);
-the [v0.4.0 record](../evidence/windows-v0.4.0-controlled-validation.json) is retained.
+The Linux runs used two existing local WSL2 distributions. The repository was
+extracted into `/tmp` inside each guest, the tests ran there, and the copies
+were removed; the cgroup and sandbox checks created and removed their own
+cgroup and namespaces. WSL2 runs a real Linux kernel, but these are guest runs,
+not native Linux hardware, macOS, or ARM64 results. The compact record is
+[`v0.4.2-local-validation.json`](../evidence/v0.4.2-local-validation.json); the
+[v0.4.1](../evidence/windows-v0.4.1-controlled-validation.json) and
+[v0.4.0](../evidence/windows-v0.4.0-controlled-validation.json) records are retained.
 Tests created their own targets and removed their temporary fixtures; they did
-not select a user's Codex PID. The ordinary installed CLI doctor also ran
-against the actual host without terminating its detected app-servers.
+not select a real Codex PID.
 
-A regression reproduced an incorrect claim of 12 GiB reclaimed when protected
-descendants still survived. It failed before the fix and passed afterward.
-The worker now reports excluded survivors separately and does not invent zero
-Codex memory for that case. Physical/commit after readings in the lightweight
-worker sample remain `null`; a normal post-resume snapshot is still required.
+Defects fixed in v0.4.2 include: recovery adopting unrelated Windows processes
+through recycled parent PIDs; recovery reports counting processes that left
+the tree, refused a signal, or were started during termination as reclaimed;
+Windows PowerShell 5.1 exceeding its time limit on large trees after the
+app-server had stopped; Windows snapshots failing under Japanese and Chinese
+code pages and in Constrained Language mode; PowerShell lookup through the
+current directory and `node_modules\.bin`; cgroup page cache counted as
+pressure; Codex's Linux sandbox and other private process views reported as
+healthy; macOS prompts and `app-server` helper subcommands mistaken for servers;
+swapped compare inputs reported as reductions; npm 12 refusing the documented
+install command; and the Linux live test failing on Node 23.8 and later.
 
-v0.4.1 adds checks for three defects found after v0.4.0, each reproduced before
+v0.4.1 added checks for three defects found after v0.4.0, each reproduced before
 its fix: the Windows recovery worker opened a visible console window, and
 closing it would end the worker mid-recovery; `compare` rejected snapshots
 saved by Windows PowerShell 5.1 redirection; and an incomplete process scan
-with no crossed threshold reported an overall `HEALTHY`.
+with no crossed threshold reported an overall `HEALTHY`. A v0.4.0 regression
+reproduced an incorrect claim of 12 GiB reclaimed when protected descendants
+still survived; the worker reports excluded survivors separately.
 
 ## Recorded recovery images
 
@@ -133,7 +148,8 @@ runtime to obtain a test result. Elevated/root access is not a test prerequisite
 | Windows ARM64 | `windows-11-arm` | 22 |
 
 Each native job runs behavior regressions, actual scoped diagnostics, controlled
-recovery with an unrelated survivor, and a package-content check. The Alpine
+recovery with an unrelated survivor, and `npm pack --dry-run`, which lists the
+packed files but asserts nothing about them. The Alpine
 job runs with networking disabled, a 384 MiB cgroup memory limit, a read-only
 source mount, and a PATH without `ps`. It checks the observed limit and exercises
 live diagnostics and controlled recovery. Container startup/image pulling is a
@@ -158,9 +174,9 @@ native evidence. No billing setting or financial record was changed. Check the
 [actual workflow status](https://github.com/krutftw/ramraccoon/actions/workflows/portable.yml)
 for subsequent results; do not reinterpret a configured matrix as green.
 
-This local Windows environment had no running Linux container daemon, no
-running suitable WSL guest, and no configured remote test host. Unrelated
-project VMs were not started or repurposed for this validation.
+No Linux container daemon or remote test host was available. For v0.4.2, two
+existing WSL2 distributions ran the suites from a temporary copy, as recorded
+above; that is local guest evidence, not a passing hosted matrix.
 
 ## Device and isolation boundaries
 

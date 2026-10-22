@@ -5,7 +5,8 @@ cleaner. System-wide diagnostics and Codex-specific recovery are separate.
 
 ## Development
 
-Use Node 20+ (prefer a supported LTS). There are no runtime packages to install:
+Use Node 20+ (prefer a supported LTS); the test runner needs Node 20.10 or newer.
+There are no runtime packages to install:
 
 ```text
 npm test
@@ -14,13 +15,25 @@ npm run test:recovery
 npm pack --dry-run
 ```
 
-- `npm test`: deterministic behavior regressions for comparisons, process
-  classification, PID identities, CLI errors, Linux/cgroup and macOS parsers.
+- `npm test`: behavior regressions for comparisons, process classification,
+  PID identities, CLI errors, Linux/cgroup and macOS parsers. One CLI test
+  starts a disposable test-mode fixture, takes live read-only process scans,
+  and checks that malformed or forged recovery commands against it are refused;
+  on Windows another runs PowerShell under legacy code pages. Expect a minute
+  or more on a busy host.
 - `test:live`: creates a disposable tree, runs actual diagnostics, verifies
-  scope/privacy/read-only survival and local doctor readiness, then cleans up.
+  scope/privacy/read-only survival, an in-tree check that marks its own runtime
+  without phantom MCP markers, and on Windows a real `codex.exe app-server`
+  copy of Node. Doctor must be ready unless its own warnings explain partial
+  visibility, such as a sandbox.
 - `test:recovery`: creates a target tree and unrelated survivor tree, stops only
-  the explicitly selected target, and checks the detached worker's evidence.
-  It is destructive **only to its own fixtures**, never an existing Codex PID.
+  the explicitly selected target (its child is detached, so only recovery can
+  stop it), and checks the detached worker's evidence. A second target loses a
+  process from its tree during the delay; the result must be `partial` with no
+  claimed reduction. A third job is marked failed before its delay ends, and
+  its worker must stand down without stopping anything. It is destructive
+  **only to its own fixtures**, never an existing Codex PID, and reports
+  SKIPPED inside a sandbox, where recovery is refused by design.
 
 The canonical runtime is `skills/ramraccoon/scripts/ramraccoon.mjs` with
 read-only OS adapters in `platform.mjs`. Keep one implementation; do not add
