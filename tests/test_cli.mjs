@@ -5,29 +5,62 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { CLI_TIMEOUT, environment, startFixture, stopFixture } from "./fixture-support.mjs";
 
 const cli = fileURLToPath(new URL("../skills/ramraccoon/scripts/ramraccoon.mjs", import.meta.url));
-const invoke = (args) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", timeout: 30000, windowsHide: true });
+const invoke = (args, env = process.env, timeout = 30000) => spawnSync(process.execPath, [cli, ...args], { env, encoding: "utf8", timeout, windowsHide: true });
 
-test("ambiguous recovery commands fail without creating a recovery job", () => {
+test("ambiguous recovery commands fail without creating a recovery job", async () => {
+  // Against a live test-mode target, only validation stands between these commands and a job.
+  const fixture = await startFixture();
   const directory = mkdtempSync(path.join(os.tmpdir(), "ramraccoon-rejected-"));
   try {
+    const pid = String(fixture.pid);
+    // A full process scan is slow on a busy Windows host.
+    const control = invoke(["snapshot", "--app-server-pid", pid, "--json"], environment, CLI_TIMEOUT);
+    assert.equal(control.status, 0, `${control.stderr} ${control.error ?? ""}`);
     for (const args of [
       ["recover", "--yes"],
-      ["recover", "--yes=false", "--app-server-pid", "10"],
+      ["recover", "--app-server-pid", pid],
+      ["recover", "--yes=false", "--app-server-pid", pid],
       ["recover", "--yes", "--app-server-pid", "0"],
       ["recover", "--yes", "--app-server-pid", "-1"],
       ["recover", "--yes", "--app-server-pid", "1.5"],
-      ["recover", "--yes", "--appserver-pid", "10"],
-      ["recover", "--yes", "--app-server-pid", "10", "--app-server-pid", "20"],
-      ["recover", "--yes", "--app-server-pid", "10", "--delay-seconds", "NaN"],
+      ["recover", "--yes", "--appserver-pid", pid],
+      ["recover", "--yes", "--app-server-pid", pid, "--app-server-pid", String(fixture.childPid)],
+      ["recover", "--yes", "--app-server-pid", pid, "--delay-seconds", "NaN"],
+      ["recover", "--yes", "--app-server-pid", pid, "--internal-test-mode"],
     ]) {
-      const result = invoke([...args, "--output-dir", directory]);
+      const result = invoke([...args, "--output-dir", directory], environment);
       assert.equal(result.status, 1, `${args.join(" ")}: ${result.stdout} ${result.stderr}`);
       assert.deepEqual(readdirSync(directory), []);
     }
+    // Stopping a namespace init ends every process in the namespace.
+    const init = invoke(["recover", "--yes", "--app-server-pid", "1", "--output-dir", directory], environment);
+    assert.equal(init.status, 1);
+    assert.match(init.stderr, /process-namespace init/);
+    assert.deepEqual(readdirSync(directory), []);
+    // The internal worker runs only a job that `recover --yes` scheduled for this target.
+    const identity = fixture.identities.get(fixture.pid);
+    for (const [id, report] of [
+      ["forged-empty", {}],
+      ["forged-failed", { Status: "failed", Target: { AppServerPid: fixture.pid, StartIdentity: identity } }],
+      ["forged-completed", { Status: "completed", Target: { AppServerPid: fixture.pid, StartIdentity: identity } }],
+      ["forged-identity", { Status: "scheduled", Target: { AppServerPid: fixture.pid, StartIdentity: "not-the-identity" } }],
+      ["forged-pid", { Status: "scheduled", Target: { AppServerPid: fixture.childPid, StartIdentity: identity } }],
+    ]) {
+      writeFileSync(path.join(directory, `${id}-recovery.json`), JSON.stringify(report));
+      const forged = invoke([
+        "__recover-worker", "--app-server-pid", pid, "--start-identity", identity,
+        "--output-dir", directory, "--id", id, "--delay-seconds", "5", "--settle-seconds", "1",
+      ], environment);
+      assert.equal(forged.status, 1, id);
+      assert.match(forged.stderr, /no matching scheduled recovery/, id);
+    }
+    process.kill(fixture.pid, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
+    await stopFixture(fixture);
   }
 });
 

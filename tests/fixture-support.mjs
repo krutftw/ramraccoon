@@ -7,15 +7,19 @@ import { processTable } from "../skills/ramraccoon/scripts/platform.mjs";
 import { sameProcessIdentity } from "../skills/ramraccoon/scripts/ramraccoon.mjs";
 
 export const cli = fileURLToPath(new URL("../skills/ramraccoon/scripts/ramraccoon.mjs", import.meta.url));
-export const environment = { ...process.env, RAMRACCOON_TEST_MODE: "1" };
+// Fixtures watch the test runner and stop when it is gone.
+export const environment = { ...process.env, RAMRACCOON_TEST_MODE: "1", RAMRACCOON_TEST_RUNNER_PID: String(process.pid) };
 export const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// One CLI call can take several process scans of up to 120 s each on a busy host.
+export const CLI_TIMEOUT = 360000;
 
-export async function startFixture() {
+// A chain fixture adds a middle process that can exit and leave a detached leaf.
+export async function startFixture({ chain = false, readyTimeoutMs = 120000 } = {}) {
   const directory = mkdtempSync(path.join(os.tmpdir(), "ramraccoon fixture "));
   const fixture = path.join(directory, "fake-app-server.mjs");
   copyFileSync(fileURLToPath(new URL("./fixtures/fake-app-server.mjs", import.meta.url)), fixture);
   const secret = `private-argument-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const child = spawn(process.execPath, [fixture, "ramraccoon-test-app-server", secret], {
+  const child = spawn(process.execPath, [fixture, "ramraccoon-test-app-server", secret, ...(chain ? ["chain"] : [])], {
     env: environment,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -24,7 +28,7 @@ export async function startFixture() {
     const ready = await new Promise((resolve, reject) => {
       let output = "";
       let errors = "";
-      const timeout = setTimeout(() => reject(new Error(`Fixture readiness timed out: ${errors}`)), 20000);
+      const timeout = setTimeout(() => reject(new Error(`Fixture readiness timed out: ${errors}`)), readyTimeoutMs);
       child.stderr.on("data", (data) => { errors = (errors + data).slice(-4096); });
       child.stdout.on("data", (data) => {
         output += data;
@@ -37,7 +41,7 @@ export async function startFixture() {
       child.once("exit", () => { clearTimeout(timeout); reject(new Error(`Fixture exited before readiness: ${errors}`)); });
     });
     const rows = processTable().rows;
-    const identities = new Map([ready.pid, ready.childPid].map((pid) => {
+    const identities = new Map([ready.pid, ready.childPid, ready.leafPid].filter(Boolean).map((pid) => {
       const row = rows.find((candidate) => candidate.pid === pid);
       if (!row) throw new Error("A newly created fixture disappeared before its identity was captured.");
       return [pid, row.startIdentity || row.startedAt];
@@ -51,16 +55,23 @@ export async function startFixture() {
   }
 }
 
+// Cleanup never throws, so one failed scan cannot hide the test's own error
+// or leave later fixtures and their temporary directories behind.
 export async function stopFixture(fixture) {
-  if (fixture.child.connected) fixture.child.send("stop");
-  await pause(150);
-  const rows = processTable().rows;
-  for (const [pid, identity] of fixture.identities) {
-    const row = rows.find((candidate) => candidate.pid === pid);
-    if (sameProcessIdentity(row, identity)) {
-      try { process.kill(pid, "SIGTERM"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+  try {
+    if (fixture.child.connected) fixture.child.send("stop");
+    await pause(750);
+    const rows = processTable().rows;
+    for (const [pid, identity] of fixture.identities) {
+      const row = rows.find((candidate) => candidate.pid === pid);
+      if (sameProcessIdentity(row, identity)) {
+        try { process.kill(pid, "SIGTERM"); } catch { /* It exited meanwhile. */ }
+      }
     }
+    await pause(150);
+  } catch {
+    if (fixture.child.exitCode === null && fixture.child.signalCode === null) fixture.child.kill();
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
   }
-  await pause(150);
-  rmSync(fixture.directory, { recursive: true, force: true });
 }

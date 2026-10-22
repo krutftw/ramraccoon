@@ -1,0 +1,67 @@
+{
+  "RecordedAt": "2026-10-22",
+  "Version": "0.4.2",
+  "Environments": [
+    {
+      "Platform": "win32",
+      "Architecture": "x64",
+      "OS": "Windows 11 Pro 10.0.26100",
+      "NodeVersion": "24.11.1",
+      "RegressionTests": { "Passed": 57, "Failed": 0, "Skipped": 0 },
+      "LiveDiagnostics": { "Result": "PASSED", "DoctorStatus": "ready", "RealCodexExeAppServerCopy": "detected from its command line" },
+      "ControlledRecovery": {
+        "Result": "PASSED",
+        "TargetType": "controlled fixture, not a Codex runtime",
+        "UnrelatedFixtureSurvived": true,
+        "DetachedSurvivorReportedPartial": true,
+        "AbandonedJobLeftTargetRunning": true,
+        "HiddenConsoleCheck": "conclusive (classic console host)"
+      },
+      "Distribution": { "PackedFiles": 15, "OfflinePackedInstall": "PASSED", "InstalledCliVersion": "0.4.2", "InstalledCliDoctorStatus": "ready" }
+    },
+    {
+      "Platform": "linux",
+      "Architecture": "x64",
+      "OS": "Ubuntu 22.04.5 LTS (WSL2 guest)",
+      "NodeVersion": "24.21.0",
+      "RegressionTests": { "Passed": 56, "Failed": 0, "Skipped": 1, "SkippedReason": "Windows-only code-page test" },
+      "LiveDiagnostics": { "Result": "PASSED", "DoctorStatus": "ready" },
+      "ControlledRecovery": { "Result": "PASSED", "DetachedSurvivorReportedPartial": true, "AbandonedJobLeftTargetRunning": true },
+      "NamespaceInitSeenFromOutside": "detected through NSpid"
+    },
+    {
+      "Platform": "linux",
+      "Architecture": "x64",
+      "OS": "Alpine Linux 3.24 (WSL2 guest)",
+      "NodeVersion": "24.18.1",
+      "RegressionTests": { "Passed": 56, "Failed": 0, "Skipped": 1, "SkippedReason": "Windows-only code-page test" },
+      "LiveDiagnostics": { "Result": "PASSED", "DoctorStatus": "ready" },
+      "ControlledRecovery": { "Result": "PASSED", "DetachedSurvivorReportedPartial": true, "AbandonedJobLeftTargetRunning": true },
+      "NamespaceInitSeenFromOutside": "detected through NSpid",
+      "CodexStyleSandbox": {
+        "Launch": "bwrap --unshare-user --unshare-pid --as-pid-1 --proc /proc, helper as PID 1 with --apply-seccomp-then-exec",
+        "Environment": "WSL guest (bubblewrap sandbox)",
+        "ProcessScanComplete": false,
+        "RiskLevel": "UNKNOWN"
+      },
+      "CgroupV2Limit": {
+        "MemoryMaxMiB": 384,
+        "ReportedLimitGiB": 0.38,
+        "RawUsageMiB": 309,
+        "InactiveFileMiB": 300,
+        "ReportedPercent": 5.9,
+        "Version041ReportedPercent": 83.8,
+        "Version041HostLevel": "ELEVATED"
+      }
+    }
+  ],
+  "HostedVerification": {
+    "Status": "Not run",
+    "Reason": "GitHub Actions jobs cannot start while the account is locked for a billing issue."
+  },
+  "Limitations": [
+    "Linux results come from WSL2 guests, not native Linux hardware",
+    "No macOS or ARM64 run",
+    "No real Codex runtime was terminated"
+  ]
+}

@@ -3,26 +3,25 @@
 import {
   spawn,
 } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { hostMemory, platformSupport, powershellExecutable, processTable, run } from "./platform.mjs";
+import { asciiJson, hostMemory, platformSupport, powershellExecutable, processTable, quotePowerShellLiteral, run, TEST_MODE } from "./platform.mjs";
 
 const GIB = 1024 ** 3;
-const VERSION = "0.4.1";
+const VERSION = "0.4.2";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
-const TEST_MODE =
-  process.env.RAMRACCOON_TEST_MODE === "1" ||
-  process.argv.includes("--internal-test-mode");
 
 function round(value, places = 2) {
   const factor = 10 ** places;
@@ -48,10 +47,12 @@ function commandArguments(row) {
   return tokens(command);
 }
 
+const isTestFixture = (row) => TEST_MODE && commandArguments(row).includes("ramraccoon-test-app-server");
+
 function isAppServer(row) {
   if (!row) return false;
   const argv = commandArguments(row);
-  if (TEST_MODE && argv.includes("ramraccoon-test-app-server")) return true;
+  if (isTestFixture(row)) return true;
   const name = path.win32.basename(path.posix.basename(row.name || "")).toLowerCase();
   if (name !== "codex" && name !== "codex.exe") return false;
   const valueOptions = new Set(["-c", "--config", "--enable", "--disable", "-p", "--profile", "-C", "--cd"]);
@@ -64,17 +65,34 @@ function isAppServer(row) {
     if (option.startsWith("--") && valueOptions.has(option.split("=")[0]) && option.includes("=")) continue;
     if (option === "--strict-config") continue;
     // Only the actual subcommand identifies a server, never a prompt or config value.
-    return option === "app-server";
+    if (option !== "app-server") return false;
+    // `app-server` takes options only. A following word is a helper subcommand
+    // such as `daemon` or `generate-ts`, or, where macOS ps joined argv with
+    // spaces, a prompt that begins with "app-server". Later tokens can be option
+    // values that contain spaces.
+    return argv.length === index + 1 || argv[index + 1].startsWith("-");
   }
   return false;
+}
+
+// Windows keeps an exited parent's PID in ParentProcessId and later reuses
+// that PID, so a process that started before its recorded parent is an orphan.
+// Other platforms reparent orphans, and macOS start times are ambiguous local
+// times during a daylight-saving change, so only Windows rows are checked.
+function startedBeforeParent(row, parent) {
+  if (!row?.parentMayBeStale || !parent?.parentMayBeStale) return false;
+  const started = Date.parse(row?.startedAt);
+  const parentStarted = Date.parse(parent?.startedAt);
+  return Number.isFinite(started) && Number.isFinite(parentStarted) && started < parentStarted;
 }
 
 function indexProcesses(rows) {
   const byPid = new Map();
   const children = new Map();
+  for (const row of rows) byPid.set(Number(row.pid), row);
   for (const row of rows) {
-    byPid.set(Number(row.pid), row);
     const parent = Number(row.ppid);
+    if (startedBeforeParent(row, byPid.get(parent))) continue;
     if (!children.has(parent)) children.set(parent, []);
     children.get(parent).push(row);
   }
@@ -87,14 +105,16 @@ function topLevelAppServers(rows) {
   const serverIds = new Set(servers.map((row) => Number(row.pid)));
 
   return servers.filter((server) => {
-    let parent = Number(server.ppid);
+    let child = server;
     const visited = new Set();
-    while (parent > 0 && !visited.has(parent)) {
-      visited.add(parent);
-      if (serverIds.has(parent)) return false;
-      const row = byPid.get(parent);
-      if (!row) break;
-      parent = Number(row.ppid);
+    while (Number(child.ppid) > 0 && !visited.has(Number(child.ppid))) {
+      visited.add(Number(child.ppid));
+      const parent = byPid.get(Number(child.ppid));
+      if (!parent || startedBeforeParent(child, parent)) break;
+      // Tests run from a Codex task sit beneath a real app-server; a fixture
+      // is nested only beneath another fixture.
+      if (serverIds.has(Number(parent.pid)) && isTestFixture(parent) === isTestFixture(server)) return false;
+      child = parent;
     }
     return true;
   });
@@ -194,8 +214,8 @@ function topMemoryConsumers(rows, platform = process.platform) {
 function windowsServices() {
   const command = [
     "$ErrorActionPreference='Stop'",
-    "ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Service -Filter 'ProcessId > 0' |",
-    "  Select-Object ProcessId,Name,DisplayName)",
+    "$services=@(Get-CimInstance Win32_Service -Filter 'ProcessId > 0' | Select-Object ProcessId,Name,DisplayName)",
+    asciiJson("ConvertTo-Json -Compress -InputObject $services"),
   ].join("\n");
   try {
     const services = JSON.parse(
@@ -252,13 +272,46 @@ function classifyHostMemory(host) {
   return higherRisk(physicalRisk, riskLevel(commitPercent, null, 0, 0), riskLevel(null, host.cgroup?.percent, 0, 0));
 }
 
-export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {}) {
+// Reasons follow classifyHostMemory: unrounded values, and an OS pressure
+// signal takes precedence over the physical estimate.
+function hostRiskReasons(host) {
+  const physicalPercent = host.totalBytes > 0 ? (host.totalBytes - host.freeBytes) / host.totalBytes * 100 : null;
+  const commitPercent = host.commitLimitEnforced === true && host.commitLimitBytes > 0 && host.committedBytes != null
+    ? host.committedBytes / host.commitLimitBytes * 100 : null;
+  const reasons = [];
+  if (commitPercent >= 80) reasons.push(`Enforced commit usage is ${round(commitPercent, 1)} percent.`);
+  if (physicalPercent >= 80) {
+    reasons.push(host.memoryPressure
+      ? `The ${host.availabilityKind} is ${round(physicalPercent, 1)} percent used; the operating system's ${host.memoryPressure} pressure level takes precedence.`
+      : `Physical memory usage is ${round(physicalPercent, 1)} percent (${host.availabilityKind}).`);
+  }
+  if (host.cgroup?.percent >= 80) reasons.push(`A visible cgroup memory limit is ${round(host.cgroup.percent, 1)} percent used.`);
+  if (host.memoryPressure && host.memoryPressure !== "HEALTHY") reasons.push(`The operating system reports ${host.memoryPressure} memory pressure.`);
+  return reasons;
+}
+
+export function createSnapshot(options) {
+  return collectSnapshot(options).report;
+}
+
+function collectSnapshot({ appServerPid = 0, requireTopLevel = false } = {}) {
   if (!Number.isSafeInteger(appServerPid) || appServerPid < 0) throw new Error("appServerPid must be a non-negative integer.");
   const { rows, warnings: processWarnings } = processTable();
+  const host = hostMemory();
+  // A sandbox's private process view hides everything outside it, so its scan
+  // cannot support comparisons or recovery.
+  const sandboxed = host.processViewSandboxed === true;
+  const scanComplete = processWarnings.length === 0 && !sandboxed;
   const { byPid } = indexProcesses(rows);
   let servers = topLevelAppServers(rows);
   if (Number(appServerPid) > 0) {
     const selected = rows.find((row) => Number(row.pid) === Number(appServerPid));
+    if (!selected && sandboxed) {
+      throw new Error(`PID ${appServerPid} is not visible from inside this sandbox; run the check outside it.`);
+    }
+    if (!scanComplete && (!selected || !isAppServer(selected))) {
+      throw new Error(`PID ${appServerPid} could not be verified as a Codex app-server because the process scan is incomplete: ${processWarnings.join(" ")}`);
+    }
     if (!selected || !isAppServer(selected)) {
       throw new Error(`PID ${appServerPid} is not a running Codex app-server.`);
     }
@@ -273,17 +326,22 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
 
   const memoryMetric =
     process.platform === "win32" ? "private bytes" : "summed RSS";
+  const trees = new Map();
   const appServers = servers.map((server) => {
     const tree = descendants(rows, server.pid);
+    trees.set(Number(server.pid), tree);
     const rssBytes = tree.reduce((total, row) => total + Number(row.rssBytes || 0), 0);
     const privateBytes =
       process.platform === "win32"
         ? tree.reduce((total, row) => total + Number(row.privateBytes || 0), 0)
         : null;
     const measuredBytes = privateBytes ?? rssBytes;
+    const parent = byPid.get(Number(server.ppid));
     return {
       AppServerPid: Number(server.pid),
-      ParentName: byPid.get(Number(server.ppid))?.name || null,
+      ParentName: parent && !startedBeforeParent(server, parent) ? parent.name || null : null,
+      // Identifies the runtime that launched this check, normally the agent's own task.
+      ContainsCurrentProcess: tree.some((row) => Number(row.pid) === process.pid),
       StartedAt: server.startedAt || null,
       StartIdentity: server.startIdentity || server.startedAt || null,
       ProcessCount: tree.length,
@@ -296,7 +354,6 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
     };
   });
 
-  const host = hostMemory();
   const physicalUsedBytes = Math.max(0, host.totalBytes - host.freeBytes);
   const physicalPercent =
     host.totalBytes > 0 ? round((physicalUsedBytes / host.totalBytes) * 100, 1) : 0;
@@ -319,23 +376,26 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
   const { level, codexLevel } = classifySnapshotRisk(
     hostLevel,
     riskLevel(null, null, measuredGiB, processCount),
-    processWarnings.length === 0,
+    scanComplete,
   );
-  const reasons = [];
-  if (host.commitLimitEnforced === true && commitPercent >= 80) reasons.push(`Enforced commit usage is ${commitPercent} percent.`);
-  if (physicalPercent >= 80) reasons.push(`Physical memory usage is ${physicalPercent} percent (${host.availabilityKind}).`);
-  if (host.cgroup?.percent >= 80) reasons.push(`A visible cgroup memory limit is ${round(host.cgroup.percent, 1)} percent used.`);
-  if (host.memoryPressure && host.memoryPressure !== "HEALTHY") reasons.push(`The operating system reports ${host.memoryPressure} memory pressure.`);
+  const reasons = hostRiskReasons(host);
   if (measuredGiB >= 4) reasons.push(`Codex app-server trees use ${measuredGiB} GiB of ${memoryMetric}.`);
   if (processCount >= 100) reasons.push(`Codex app-server trees contain ${processCount} processes.`);
-  if (!appServers.length) reasons.push("No Codex app-server was found.");
+  if (!appServers.length) {
+    reasons.push(sandboxed ? "No Codex app-server is visible from inside this sandbox."
+      : !scanComplete ? "No Codex app-server was identified; the process scan is incomplete, so one may be hidden."
+        : "No Codex app-server was found.");
+  }
 
   const recommendations = [];
-  if (hostLevel !== "HEALTHY") {
+  if (sandboxed) {
+    recommendations.push("Run the check outside the sandbox; processes outside it, including any Codex app-server, are invisible from here.");
+  } else if (hostLevel !== "HEALTHY") {
     recommendations.push(
       "Inspect the top system consumers before choosing a recovery target; host pressure alone does not identify Codex as the cause.",
     );
-    if (!appServers.length) {
+    // An incomplete scan cannot show that no app-server exists.
+    if (!appServers.length && scanComplete) {
       recommendations.push("No Codex app-server was found; no supported app-server recovery target is available.");
     }
   }
@@ -348,7 +408,7 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
   }
   if (level === "HEALTHY") {
     recommendations.push("No pressure threshold was crossed; keep housekeeping read-only.");
-  } else if (level === "UNKNOWN") {
+  } else if (level === "UNKNOWN" || (!scanComplete && !sandboxed)) {
     recommendations.push("Some processes could not be inspected, so Codex usage is unknown. Report the missing visibility instead of treating this as healthy.");
   }
 
@@ -363,7 +423,7 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
     }
   }
 
-  return {
+  const report = {
     SchemaVersion: "3.0",
     Timestamp: new Date().toISOString(),
     Scope: appServerPid > 0 ? "selected app-server" : "all visible app-servers",
@@ -373,6 +433,7 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
       MachineArchitecture: os.machine(),
       Environment: host.environment,
       ProcessScope: "visible operating-system processes",
+      ProcessViewSandboxed: sandboxed,
       PhysicalAvailabilityKind: host.availabilityKind,
       OS: host.os,
       OSVersion: host.osVersion,
@@ -407,7 +468,7 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
     },
     Risk: { Level: level, HostLevel: hostLevel, CodexLevel: codexLevel, Reasons: reasons },
     Totals: {
-      ProcessScanComplete: processWarnings.length === 0,
+      ProcessScanComplete: scanComplete,
       TopLevelAppServers: appServers.length,
       CodexProcessCount: processCount,
       MemoryMetric: memoryMetric,
@@ -425,6 +486,7 @@ export function createSnapshot({ appServerPid = 0, requireTopLevel = false } = {
       CommandLinesEmitted: false,
     },
   };
+  return { report, trees };
 }
 
 function snapshotMemoryGiB(snapshot) {
@@ -456,7 +518,8 @@ function memoryChange(before, after) {
 
 function lightweightRecoverySnapshot(before, termination) {
   const totalBytes = os.totalmem();
-  const completed = termination.StillRunning === 0 && termination.ExcludedStillRunning === 0;
+  const completed = termination.StillRunning === 0 && termination.ExcludedStillRunning === 0 &&
+    !termination.DetachedStillRunning && !termination.SpawnedStillRunning;
   return {
     SchemaVersion: "3.0-recovery",
     Timestamp: new Date().toISOString(),
@@ -478,7 +541,7 @@ function lightweightRecoverySnapshot(before, termination) {
     Risk: {
       Level: "UNKNOWN",
       Reasons: [
-        "This lightweight sample avoids a full process scan during critical recovery.",
+        "This lightweight sample records which target identities remain after termination; it takes no host memory readings.",
       ],
     },
     Totals: {
@@ -494,9 +557,11 @@ function lightweightRecoverySnapshot(before, termination) {
     Recommendations: [
       "After reopening or resuming Codex, capture a full snapshot for the new baseline.",
     ],
+    // This sample follows a termination, so it must not claim to be read-only.
     Safety: {
-      ReadOnly: true,
-      ProcessesTerminated: 0,
+      ReadOnly: false,
+      ProcessesSignalled: termination.Attempted ?? null,
+      ProcessesTerminated: termination.Terminated ?? null,
       CommandLinesEmitted: false,
     },
   };
@@ -507,18 +572,24 @@ export function compareSnapshots(before, after) {
   const afterMetric = after?.Totals?.MemoryMetric || null;
   const memory = memoryChange(snapshotMemoryGiB(before), snapshotMemoryGiB(after));
   const complete = before?.Totals?.ProcessScanComplete !== false && after?.Totals?.ProcessScanComplete !== false;
-  const sameHostKind = !before?.Host?.Platform || !after?.Host?.Platform || before.Host.Platform === after.Host.Platform;
+  // Schema 1.0 reports came from the Windows-only PowerShell releases and record no platform.
+  const platformOf = (snapshot) => snapshot?.Host?.Platform || (snapshot?.SchemaVersion === "1.0" ? "win32" : null);
+  const sameHostKind = !platformOf(before) || !platformOf(after) || platformOf(before) === platformOf(after);
   const sameScope = !before.Scope || !after.Scope || before.Scope === after.Scope;
-  const comparable = complete && sameHostKind && sameScope && (!beforeMetric || !afterMetric || beforeMetric === afterMetric);
+  // Swapped files would turn growth into a claimed reduction.
+  const beforeTime = Date.parse(before?.Timestamp);
+  const afterTime = Date.parse(after?.Timestamp);
+  const inOrder = !Number.isFinite(beforeTime) || !Number.isFinite(afterTime) || afterTime >= beforeTime;
+  const comparable = complete && sameHostKind && sameScope && inOrder && (!beforeMetric || !afterMetric || beforeMetric === afterMetric);
   const counts = measurementChange(before?.Totals?.CodexProcessCount, after?.Totals?.CodexProcessCount);
-  if (!complete || !sameHostKind || !sameScope) counts.Delta = null;
+  if (!complete || !sameHostKind || !sameScope || !inOrder) counts.Delta = null;
   if (!comparable) {
     memory.Delta = null;
     memory.Reclaimed = null;
   }
   const physical = memoryChange(before?.Host?.PhysicalUsedGiB, after?.Host?.PhysicalUsedGiB);
   const committed = memoryChange(before?.Host?.CommittedGiB, after?.Host?.CommittedGiB);
-  if (!sameHostKind) {
+  if (!sameHostKind || !inOrder) {
     for (const change of [physical, committed]) {
       change.Delta = null;
       change.Reclaimed = null;
@@ -542,9 +613,27 @@ export function compareSnapshots(before, after) {
 
 function writeJsonAtomic(file, value) {
   mkdirSync(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  renameSync(temporary, file);
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    // A partly written file, for example on a full disk, must not be left behind.
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      renameSync(temporary, file);
+      return;
+    } catch (error) {
+      // Windows refuses to replace a file that a reader or scanner briefly holds open.
+      if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(error.code) || attempt >= 40) {
+        rmSync(temporary, { force: true });
+        throw error;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
 }
 
 function readSnapshotFile(file) {
@@ -587,13 +676,18 @@ function quoteWindowsArgument(value) {
   return `${result}${"\\".repeat(slashes * 2)}"`;
 }
 
-function spawnRecoveryWorker(workerArguments) {
+async function spawnRecoveryWorker(workerArguments) {
   if (process.platform !== "win32") {
     const child = spawn(process.execPath, workerArguments, {
       detached: true,
       stdio: "ignore",
       windowsHide: true,
       env: process.env,
+    });
+    // Spawn failures arrive asynchronously; confirm the worker exists before reporting it scheduled.
+    await new Promise((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
     });
     child.unref();
     return child.pid;
@@ -606,12 +700,13 @@ function spawnRecoveryWorker(workerArguments) {
   const commandLine = [process.execPath, ...workerArguments]
     .map(quoteWindowsArgument)
     .join(" ");
-  const escaped = commandLine.replaceAll("'", "''");
   const command = [
-    `$commandLine='${escaped}'`,
+    `$commandLine=${quotePowerShellLiteral(commandLine)}`,
     "$startup=New-CimInstance -ClassName Win32_ProcessStartup -Namespace root/cimv2 -ClientOnly -Property @{ShowWindow=[uint16]0}",
     "$result=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$commandLine; ProcessStartupInformation=$startup}",
-    "if([int]$result.ReturnValue -ne 0){throw \"Win32_Process.Create failed: $($result.ReturnValue)\"}",
+    // A distinct exit code says no worker was created; error text would also
+    // match this script, which Node echoes in every failure message.
+    "if([int]$result.ReturnValue -ne 0){exit 3}",
     "[int]$result.ProcessId",
   ].join("\n");
   const output = run(powershellExecutable(), [
@@ -664,12 +759,12 @@ function parseArguments(argv) {
     snapshot: ["app-server-pid", "output", "json"],
     compare: ["before", "after", "json"],
     recover: ["app-server-pid", "output-dir", "thread-id", "yes", "id", "delay-seconds", "settle-seconds", "foreground"],
-    "__recover-worker": ["app-server-pid", "output-dir", "id", "delay-seconds", "settle-seconds", "start-identity"],
+    "__recover-worker": ["app-server-pid", "output-dir", "id", "delay-seconds", "settle-seconds", "start-identity", "internal-test-mode"],
   };
   const command = parsed._[0];
   if (command && !allowed[command]) throw new Error(`Unknown command: ${command}`);
   for (const key of Object.keys(parsed)) {
-    if (["_", "help", "version", "internal-test-mode"].includes(key)) continue;
+    if (["_", "help", "version"].includes(key)) continue;
     if (!allowed[command]?.includes(key)) throw new Error(`--${key} is not valid for ${command || "the root command"}.`);
   }
   if (parsed["app-server-pid"] !== undefined) positivePid(parsed["app-server-pid"]);
@@ -689,10 +784,12 @@ function doctor() {
   if (!support.SnapshotSupported) return { ...support, Status: "unsupported", RecoverySupported: false };
   try {
     const snapshot = createSnapshot();
+    // An incomplete scan, including a sandbox's private process view, cannot support recovery.
+    const visible = snapshot.Totals.ProcessScanComplete;
     return {
       ...support,
-      Status: snapshot.Totals.ProcessScanComplete ? "ready" : "partial",
-      RecoverySupported: snapshot.Totals.ProcessScanComplete,
+      Status: visible ? "ready" : "partial",
+      RecoverySupported: visible,
       RecoveryRequiresApproval: true,
       AppServerTargets: snapshot.AppServers.length,
       Host: snapshot.Host,
@@ -731,11 +828,14 @@ function printSnapshot(report, json) {
   console.log(
     `Codex app-server trees: ${report.Totals.CodexProcessCount} processes / ${report.Totals.MemoryGiB} GiB ${report.Totals.MemoryMetric}`,
   );
-  console.log("Top system consumers (private bytes are not resident RAM):");
+  console.log(report.Host.Platform === "win32"
+    ? "Top system consumers (private bytes are not resident RAM):"
+    : "Top system consumers (RSS; shared pages can be counted more than once):");
   for (const row of report.TopProcesses) {
     const services = row.Services?.map((service) => `${service.Name} (${service.DisplayName})`).join(", ");
+    const resident = row.MemoryMetric === "RSS" ? "" : `; ${row.WorkingSetGiB} GiB resident`;
     console.log(
-      `  ${row.Pid} ${row.Name}: ${row.MemoryGiB} GiB ${row.MemoryMetric}; ${row.WorkingSetGiB} GiB resident${services ? `; ${services}` : ""}`,
+      `  ${row.Pid} ${row.Name}: ${row.MemoryGiB} GiB ${row.MemoryMetric}${resident}${services ? `; ${services}` : ""}`,
     );
   }
   for (const warning of report.CollectionWarnings) console.log(`Warning: ${warning}`);
@@ -747,7 +847,17 @@ function sameProcessIdentity(actual, expectedIdentity) {
 }
 
 
-async function terminateVerifiedTree(targetPid, expectedIdentity, onPlan = () => {}) {
+// Every orphan in a PID namespace is reparented to its init, and stopping it
+// ends the whole namespace, so a namespace init is never a scoped recovery
+// target, whether seen as PID 1 inside or through NSpid from outside.
+function refuseNamespaceInit(pid, row) {
+  if (Number(pid) === 1 || row?.namespaceInit) {
+    throw new Error("Recovery refused: the target is a process-namespace init, such as a container entrypoint; stopping it ends every process in the namespace. Restart the container or sandbox instead.");
+  }
+}
+
+async function terminateVerifiedTree(targetPid, expectedIdentity, onPlan = () => {}, beforeTree = [], settleMilliseconds = 1000) {
+  refuseNamespaceInit(targetPid);
   const { rows, warnings } = processTable();
   if (warnings.length) throw new Error("Recovery refused: the process scan is incomplete.");
   const { byPid } = indexProcesses(rows);
@@ -755,6 +865,7 @@ async function terminateVerifiedTree(targetPid, expectedIdentity, onPlan = () =>
   if (!isAppServer(target) || !sameProcessIdentity(target, expectedIdentity)) {
     throw new Error("Recovery refused: the app-server PID or start identity changed.");
   }
+  refuseNamespaceInit(targetPid, target);
   if (
     !topLevelAppServers(rows).some((row) => Number(row.pid) === Number(targetPid))
   ) {
@@ -774,12 +885,15 @@ async function terminateVerifiedTree(targetPid, expectedIdentity, onPlan = () =>
       const name = String(byPid.get(item.pid)?.name || "").toLowerCase();
       return !protectedWindowsHosts.has(name);
     });
-  const ordered = [
-    ...eligible.filter((item) => item.pid === Number(targetPid)),
-    ...eligible
-      .filter((item) => item.pid !== Number(targetPid))
-      .sort((a, b) => b.depth - a.depth),
-  ];
+  const root = eligible.filter((item) => item.pid === Number(targetPid));
+  const rest = eligible
+    .filter((item) => item.pid !== Number(targetPid))
+    .sort((a, b) => b.depth - a.depth);
+  // POSIX signals the root first so it can stop its children gracefully. On
+  // Windows termination is immediate: children in a kill-on-close job object,
+  // as libuv uses for non-detached children, would die with the root and free
+  // their PIDs for reuse while the loop still signals them. Stop the root last.
+  const ordered = process.platform === "win32" ? [...rest, ...root] : [...root, ...rest];
   if (ordered.some((item) => !(byPid.get(item.pid)?.startIdentity || byPid.get(item.pid)?.startedAt))) {
     throw new Error("Recovery refused: a descendant has no verifiable start identity.");
   }
@@ -791,65 +905,95 @@ async function terminateVerifiedTree(targetPid, expectedIdentity, onPlan = () =>
     })),
   );
 
+  // A root this user cannot signal would keep running above stopped children.
+  try {
+    process.kill(Number(targetPid), 0);
+  } catch (error) {
+    if (error.code === "EPERM") throw new Error("Recovery refused: this user cannot signal the app-server; nothing was stopped.");
+    if (error.code !== "ESRCH") throw error;
+  }
   const attempted = [];
-  if (process.platform === "win32") {
-    const pids = ordered.map((item) => Number(item.pid));
-    if (pids.length) {
-      const command = [
-        "$ErrorActionPreference='Stop'",
-        `$ids=@(${pids.join(",")})`,
-        "foreach($processId in $ids){",
-        "  Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue",
-        "}",
-      ].join("\n");
-      run(powershellExecutable(), [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        command,
-      ]);
-      attempted.push(...pids);
+  const denied = new Set();
+  const signal = (pid, name) => {
+    try {
+      process.kill(pid, name);
+      return true;
+    } catch (error) {
+      // A process owned by another user refuses the signal; keep stopping the
+      // rest of the plan and let the final scan count it as still running.
+      if (error.code === "EPERM") denied.add(pid);
+      else if (error.code !== "ESRCH") throw error;
+      return false;
     }
-  } else {
-    for (const item of ordered) {
-      try {
-        process.kill(item.pid, "SIGTERM");
-        attempted.push(item.pid);
-      } catch (error) {
-        if (error.code !== "ESRCH") throw error;
-      }
-    }
+  };
+  // On Windows Node terminates the process outright, as Stop-Process -Force
+  // did, without one slow PowerShell call per process on large trees.
+  for (const item of ordered) {
+    if (signal(item.pid, "SIGTERM")) attempted.push(item.pid);
+  }
+  const selectedPids = new Set(ordered.map((item) => item.pid));
+  const replacement = (row) => {
+    if (Number(row.pid) === process.pid || !selectedPids.has(Number(row.ppid))) return false;
+    const original = byPid.get(Number(row.pid));
+    return !original || !sameProcessIdentity(row, original.startIdentity || original.startedAt);
+  };
+  // POSIX reparents a child once its parent stops, so children started during
+  // the grace period are recorded while their parents are still alive.
+  const startedDuringGrace = [];
+  if (process.platform !== "win32") {
     await sleep(2500);
     const escalation = processTable();
     if (escalation.warnings.length) throw new Error("Recovery stopped: the follow-up process scan is incomplete.");
     const remaining = indexProcesses(escalation.rows).byPid;
+    for (const row of escalation.rows.filter(replacement)) startedDuringGrace.push([Number(row.pid), row.startIdentity || row.startedAt]);
     for (const item of ordered) {
       const original = byPid.get(item.pid);
-      if (!sameProcessIdentity(remaining.get(item.pid), original.startIdentity || original.startedAt)) continue;
-      try {
-        process.kill(item.pid, "SIGKILL");
-      } catch (error) {
-        if (error.code !== "ESRCH") throw error;
-      }
+      if (denied.has(item.pid) || !sameProcessIdentity(remaining.get(item.pid), original.startIdentity || original.startedAt)) continue;
+      signal(item.pid, "SIGKILL");
     }
   }
-  await sleep(1000);
+  const signalsFinishedAt = Date.now();
+  await sleep(settleMilliseconds);
   const after = processTable();
   if (after.warnings.length) throw new Error("Recovery result is unknown: the final process scan is incomplete.");
   const remaining = indexProcesses(after.rows).byPid;
-  const selectedPids = new Set(ordered.map((item) => item.pid));
+  const survives = (pid) => {
+    const original = byPid.get(pid);
+    return sameProcessIdentity(remaining.get(pid), original.startIdentity || original.startedAt);
+  };
   let stillRunning = 0;
   let excludedStillRunning = 0;
   for (const item of family) {
-    const original = byPid.get(item.pid);
-    if (!sameProcessIdentity(remaining.get(item.pid), original.startIdentity || original.startedAt)) continue;
+    if (!survives(item.pid)) continue;
     if (selectedPids.has(item.pid)) stillRunning += 1;
     else excludedStillRunning += 1;
   }
+  // Before-snapshot members whose parent exited during the delay were no longer
+  // in the tree, so they were never stopped and their memory was not released.
+  const familyPids = new Set(family.map((item) => item.pid));
+  const detachedStillRunning = beforeTree
+    .filter((member) => !familyPids.has(member.Pid) && sameProcessIdentity(remaining.get(member.Pid), member.StartIdentity))
+    .length;
+  // A planned process still alive during the loop, such as a Windows root that
+  // is stopped last, can start replacement children that were never planned.
+  // Children started after the signals belong to a process that reused a PID.
+  const spawned = new Set(after.rows.filter((row) => {
+    const started = Date.parse(row.startedAt);
+    const duringLoop = !Number.isFinite(started) || started <= signalsFinishedAt + 1000;
+    return replacement(row) && duringLoop && !startedBeforeParent(row, byPid.get(Number(row.ppid)));
+  }).map((row) => Number(row.pid)));
+  for (const [pid, identity] of startedDuringGrace) {
+    if (sameProcessIdentity(remaining.get(pid), identity)) spawned.add(pid);
+  }
+  const spawnedStillRunning = spawned.size;
   return {
     Attempted: attempted.length,
+    Terminated: attempted.filter((pid) => !survives(pid)).length,
+    PermissionDenied: denied.size,
     StillRunning: stillRunning,
     ExcludedStillRunning: excludedStillRunning,
+    DetachedStillRunning: detachedStillRunning,
+    SpawnedStillRunning: spawnedStillRunning,
   };
 }
 
@@ -860,9 +1004,17 @@ async function recoveryWorker(options) {
   const beforePath = path.join(outputDirectory, `${id}-before.json`);
   const afterPath = path.join(outputDirectory, `${id}-after.json`);
   let state = JSON.parse(readFileSync(reportPath, "utf8"));
+  // Only a job that `recover --yes` scheduled for this exact target can run.
+  if (state.Status !== "scheduled" || state.Target?.AppServerPid !== Number(options["app-server-pid"]) || state.Target?.StartIdentity !== options["start-identity"]) {
+    throw new Error("Recovery worker refused: no matching scheduled recovery.");
+  }
 
   try {
     await sleep(Number(options["delay-seconds"]) * 1000);
+    // The scheduling CLI marks the job failed when it cannot confirm this
+    // worker started; a worker that did start then stands down.
+    const current = JSON.parse(readFileSync(reportPath, "utf8"));
+    if (current.Status !== "scheduled" || current.ScheduledAt !== state.ScheduledAt) return current;
     state.Status = "terminating";
     state.TerminationStartedAt = new Date().toISOString();
     writeJsonAtomic(reportPath, state);
@@ -874,12 +1026,11 @@ async function recoveryWorker(options) {
         state.TerminationPlan = plan;
         writeJsonAtomic(reportPath, state);
       },
+      state.BeforeTree || [],
+      // Survivors are counted after the settle interval, not before it.
+      Number(options["settle-seconds"]) * 1000,
     );
     state.Termination = termination;
-    state.Status = "settling";
-    writeJsonAtomic(reportPath, state);
-
-    await sleep(Number(options["settle-seconds"]) * 1000);
     state.Status = "collecting_after";
     writeJsonAtomic(reportPath, state);
     const before = JSON.parse(readFileSync(beforePath, "utf8"));
@@ -889,7 +1040,8 @@ async function recoveryWorker(options) {
     writeJsonAtomic(afterPath, after);
     state = {
       ...state,
-      Status: termination.StillRunning === 0 ? "completed" : "partial",
+      Status: termination.StillRunning === 0 && termination.DetachedStillRunning === 0 && termination.SpawnedStillRunning === 0
+        ? "completed" : "partial",
       CompletedAt: new Date().toISOString(),
       AfterSnapshot: afterPath,
       Comparison: compareSnapshots(before, after),
@@ -911,7 +1063,7 @@ async function recoveryWorker(options) {
 async function startRecovery(options) {
   if (!options.yes) {
     throw new Error(
-      "Recovery changes process state. Re-run only after checkpointing, with --yes.",
+      "Recovery terminates the selected app-server tree. Add --yes only after the user has explicitly approved this exact PID and the disconnect, with a resume checkpoint saved.",
     );
   }
   if (options.foreground && !TEST_MODE) {
@@ -919,7 +1071,8 @@ async function startRecovery(options) {
   }
 
   const requestedPid = positivePid(options["app-server-pid"]);
-  const before = createSnapshot({
+  refuseNamespaceInit(requestedPid);
+  const { report: before, trees } = collectSnapshot({
     appServerPid: requestedPid,
     requireTopLevel: true,
   });
@@ -931,6 +1084,14 @@ async function startRecovery(options) {
   }
   const target = before.AppServers[0];
   if (!target.StartIdentity) throw new Error("Recovery refused: the target has no verifiable start identity.");
+  refuseNamespaceInit(requestedPid, trees.get(target.AppServerPid)?.[0]);
+  // Refuse before announcing a disconnect that this user could not carry out.
+  try {
+    process.kill(requestedPid, 0);
+  } catch (error) {
+    if (error.code === "EPERM") throw new Error("Recovery refused: this user cannot signal the app-server; nothing was scheduled.");
+    throw error;
+  }
   const outputDirectory = path.resolve(
     options["output-dir"] || path.join(process.cwd(), ".ramraccoon"),
   );
@@ -962,6 +1123,10 @@ async function startRecovery(options) {
     },
     BeforeSnapshot: beforePath,
     AfterSnapshot: afterPath,
+    BeforeTree: (trees.get(target.AppServerPid) || []).map((row) => ({
+      Pid: Number(row.pid),
+      StartIdentity: row.startIdentity || row.startedAt || null,
+    })),
     CheckpointRequired: true,
     Resume: options["thread-id"]
       ? `codex resume ${options["thread-id"]}`
@@ -1000,9 +1165,33 @@ async function startRecovery(options) {
     String(settleSeconds),
   ];
   if (TEST_MODE) workerArguments.push("--internal-test-mode");
-  const workerPid = spawnRecoveryWorker(workerArguments);
+  let workerPid;
+  try {
+    workerPid = await spawnRecoveryWorker(workerArguments);
+  } catch (error) {
+    // The report must not stay "scheduled" without a worker. On Windows a
+    // worker can exist even though its launch was not confirmed; it re-reads
+    // the report after the delay and stands down. A worker that already moved
+    // on owns the report.
+    const confirmedAbsent = process.platform !== "win32" || error.status === 3;
+    const current = JSON.parse(readFileSync(reportPath, "utf8"));
+    if (current.Status === "scheduled" && current.ScheduledAt === state.ScheduledAt) {
+      writeJsonAtomic(reportPath, {
+        ...current,
+        Status: "failed",
+        FailedAt: new Date().toISOString(),
+        Error: confirmedAbsent
+          ? `The recovery worker did not start: ${error.message}`
+          : `The recovery worker could not be confirmed (${error.message}); a worker that did start stands down without stopping anything.`,
+      });
+    }
+    throw error;
+  }
+  // The member list stays in the report file; it would flood the caller's output.
+  const { BeforeTree, ...summary } = state;
   return {
-    ...state,
+    ...summary,
+    BeforeTreeProcesses: BeforeTree.length,
     WorkerPid: workerPid,
     ReportPath: reportPath,
     Message: `Recovery is scheduled in ${delaySeconds} seconds. This task will disconnect while the verified app-server tree stops; reopen or resume it afterward.`,
@@ -1025,7 +1214,9 @@ From a checkout: node skills/ramraccoon/scripts/ramraccoon.mjs <command>
 
 Recovery is destructive to the selected live runtime. Checkpoint first. The
 worker re-verifies the exact PID and start identity, terminates only that
-app-server process tree, then writes a measured before/after report.
+app-server process tree, then writes termination evidence, not a memory
+measurement. After resuming, take a full scoped snapshot and compare it with
+the recovery's *-before.json.
 `;
 }
 
@@ -1112,6 +1303,7 @@ if (isMain) {
 export {
   classifyHostMemory,
   classifySnapshotRisk,
+  hostRiskReasons,
   lightweightRecoverySnapshot,
   sameProcessIdentity,
   descendants,

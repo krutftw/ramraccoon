@@ -66,6 +66,25 @@ test("legacy private-memory snapshots remain comparable", () => {
   assert.equal(result.CodexMemoryGiB.Reclaimed, 4);
 });
 
+test("swapped before and after files cannot turn growth into a reduction", () => {
+  const earlier = { ...snapshot(2, 20, 6, 10), Timestamp: "2026-10-22T01:00:00.000Z" };
+  const later = { ...snapshot(8, 100, 12, 30), Timestamp: "2026-10-22T02:00:00.000Z" };
+  const swapped = compareSnapshots(later, earlier);
+  assert.equal(swapped.CodexMemoryGiB.Reclaimed, null);
+  assert.equal(swapped.CodexProcessCount.Delta, null);
+  assert.equal(swapped.PhysicalUsedGiB.Reclaimed, null);
+  assert.equal(compareSnapshots(earlier, later).CodexMemoryGiB.Delta, 6);
+});
+
+test("a Windows-only schema 1.0 report is not comparable with a Linux snapshot", () => {
+  const before = { SchemaVersion: "1.0", Host: { PhysicalUsedGiB: 28, CommittedGiB: 90 }, Totals: { PrivateMemoryGiB: 25, CodexProcessCount: 387 } };
+  const after = { SchemaVersion: "3.0", Host: { Platform: "linux", PhysicalUsedGiB: 3, CommittedGiB: 4 }, Totals: { MemoryGiB: 0.4, MemoryMetric: "summed RSS", CodexProcessCount: 5 } };
+  const result = compareSnapshots(before, after);
+  assert.equal(result.CodexMemoryGiB.Reclaimed, null);
+  assert.equal(result.PhysicalUsedGiB.Reclaimed, null);
+  assert.equal(result.CommittedGiB.Reclaimed, null);
+});
+
 test("different memory metrics cannot produce a reclaimed-memory claim", () => {
   const result = compareSnapshots(
     snapshot(12, 30, 28, 90, "private bytes"),
@@ -163,4 +182,17 @@ test("protected surviving descendants cannot become claimed reclaimed memory", (
   const comparison = compareSnapshots(before, after);
   assert.equal(comparison.CodexMemoryGiB.Reclaimed, null);
   assert.equal(comparison.CodexProcessCount.Delta, null);
+});
+
+test("a recovery after-sample does not claim to be read-only", () => {
+  const termination = { Attempted: 37, Terminated: 35, PermissionDenied: 1, StillRunning: 3, ExcludedStillRunning: 0, DetachedStillRunning: 0, SpawnedStillRunning: 0 };
+  const after = lightweightRecoverySnapshot(snapshot(12, 240, 28, 90), termination);
+  assert.deepEqual(after.Safety, { ReadOnly: false, ProcessesSignalled: 37, ProcessesTerminated: 35, CommandLinesEmitted: false });
+  assert.equal(after.Totals.MemoryGiB, null);
+});
+
+test("replacement children started during recovery cannot become claimed reductions", () => {
+  const termination = { Attempted: 4, Terminated: 4, StillRunning: 0, ExcludedStillRunning: 0, DetachedStillRunning: 0, SpawnedStillRunning: 1 };
+  const comparison = compareSnapshots(snapshot(12, 240, 28, 90), lightweightRecoverySnapshot(snapshot(12, 240, 28, 90), termination));
+  assert.equal(comparison.CodexMemoryGiB.Reclaimed, null);
 });

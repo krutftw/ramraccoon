@@ -11,7 +11,7 @@
   <a href="#before-and-after-proof">Before / after</a> ·
   <a href="#platforms-and-devices">Platforms</a> ·
   <a href="./SECURITY.md">Safety</a> ·
-  <a href="https://github.com/krutftw/ramraccoon/releases/tag/v0.4.1">Release notes</a>
+  <a href="https://github.com/krutftw/ramraccoon/releases">Release notes</a>
 </p>
 
 <p align="center">
@@ -29,17 +29,22 @@ Recovery always requires explicit approval.
 
 ## Quick start
 
-Requires **Node.js 20+**; prefer a currently supported LTS release. Start with
+Requires **Node.js 20+**; prefer a currently supported LTS release. The GitHub
+installs below also need Git on `PATH`, because npm and `skills` fetch the
+repository with it. Start with
 ordinary user permissions, not administrator/root access.
 
 ### As a CLI
 
 ```text
-npm install --global github:krutftw/ramraccoon
+npm install --global --allow-git=all github:krutftw/ramraccoon
 ramraccoon snapshot
 ```
 
-Not sure your environment exposes the required counters? Run `ramraccoon doctor`.
+npm 12 and later refuse git installs unless `--allow-git` permits them; npm
+11.9 and later understand the flag, and older versions warn about an unknown
+flag and install normally. Not sure your
+environment exposes the required counters? Run `ramraccoon doctor`.
 
 ### As a Codex skill
 
@@ -47,7 +52,9 @@ Not sure your environment exposes the required counters? Run `ramraccoon doctor`
 npx skills add krutftw/ramraccoon -a codex -s ramraccoon -g -y
 ```
 
-Then ask:
+The `skills` installer itself requires Node.js 22.20 or newer. On older Node,
+copy `skills/ramraccoon` from this repository into your agent's skills folder
+(`~/.agents/skills/ramraccoon` is where the installer puts it). Then ask:
 
 ```text
 Use $ramraccoon to check memory pressure.
@@ -63,7 +70,7 @@ PowerShell, Command Prompt, and POSIX shells.
 Without a global CLI install:
 
 ```text
-npx --yes --package=github:krutftw/ramraccoon ramraccoon snapshot
+npx --yes --allow-git=all --package=github:krutftw/ramraccoon ramraccoon snapshot
 ```
 
 From this repository:
@@ -108,8 +115,9 @@ memory and resident RAM are labelled separately—not added together.
 | Physical available memory | OS availability on Windows/Linux; a labelled free + inactive + speculative estimate on macOS |
 | Windows private bytes | Private committed memory, **not** resident RAM; working set is shown separately |
 | Linux commit accounting | Not a hard exhaustion threshold in overcommit modes 0/1; enforced pressure only in mode 2 |
-| Linux cgroup memory | Readable v1/v2 and visible ancestor constraints; a container can be under pressure while its host has free RAM |
+| Linux cgroup memory | Readable v1/v2 and visible ancestor constraints, excluding inactive file cache the kernel can reclaim; a container can be under pressure while its host has free RAM |
 | macOS/Linux tree memory | Summed RSS, which can double-count shared pages |
+| Linux process names | The kernel's name: at most 15 characters, and programs can change it (Node.js reports `MainThread` from 23.8 and `node-MainThread` from 25.5) |
 | Missing or restricted data | Warnings and `null`, never invented zero usage or successful recovery |
 
 Top consumers are ranked by Windows private bytes or macOS/Linux RSS. Several
@@ -121,16 +129,18 @@ permission to terminate anything.
 
 ## Platforms and devices
 
-**v0.4 is a pre-release.** Windows x64 is verified locally. Native cross-platform
-CI is currently [blocked by GitHub's account billing lock](./docs/VALIDATION.md#current-external-blocker),
+**Verification status:** Windows x64, and Linux x64 under WSL2, are verified locally; native Linux hardware, macOS and ARM64 are not.
+Native cross-platform CI is currently [blocked by GitHub's account billing lock](./docs/VALIDATION.md#current-external-blocker),
 not a failing code test. Configured jobs are not presented as passing jobs.
 
 | Environment | Current status |
 |---|---|
 | Windows x64 | Live diagnostics, controlled recovery, and public installation verified |
+| Linux x64 (WSL2: Ubuntu 22.04 and Alpine) | Regression tests, live diagnostics, and controlled recovery verified; hosted CI pending |
 | macOS Intel / Apple Silicon | Collector implemented; parser tests passed; native CI pending |
-| Linux x64 / ARM64, Windows ARM64 | Collectors implemented; native CI pending |
-| WSL and Linux containers | Guest/namespace scope and readable limits only; native validation pending |
+| Native Linux x64 (not WSL), Linux ARM64, Windows ARM64 | Collectors implemented; native CI pending |
+| WSL and Linux containers | Guest/namespace scope and readable limits only; WSL2 verified live, and a cgroup-v2 memory limit verified inside WSL2 |
+| Agent sandboxes | Codex's Linux sandbox and other bubblewrap sandboxes hide processes outside them; detected and reported as incomplete, so compare leaves Codex changes unknown and recovery is refused. Codex's Windows sandbox is not detected directly but shows as unavailable or incomplete. Run checks outside the sandbox |
 | Native Android, iOS/iPadOS, browsers, BSD | No supported native system collector |
 
 Support follows the OS running Node, not the device label. Linux boards and
@@ -169,15 +179,20 @@ process cleaner and does not target standalone Codex CLIs.
 Save the objective, completed work, remaining work, workspace state, required
 external commands/services, and first resume instruction outside volatile
 runtime state. Show the target and obtain explicit approval. The CLI cannot
-judge whether your checkpoint is sufficient.
+judge whether your checkpoint is sufficient. When the check runs inside Codex
+and can see the hosting app-server, `AppServers[].ContainsCurrentProcess` marks
+it; inside a sandbox or after an incomplete scan, identify the target with the
+user. Recovery disconnects every task open in that app-server, not only one.
 
-Only then, substituting the verified PID and optional thread ID:
+Only then, substituting the verified PID, a private evidence directory outside
+the repository, and the optional thread ID:
 
 ```text
-ramraccoon recover --app-server-pid <PID> --output-dir .ramraccoon --thread-id <THREAD_ID> --yes
+ramraccoon recover --app-server-pid <PID> --output-dir <EVIDENCE_DIR> --thread-id <THREAD_ID> --yes
 ```
 
 The angle-bracket values are placeholders, not literal shell arguments.
+Without `--output-dir`, evidence goes to `.ramraccoon` in the current directory.
 Recovery records a full before snapshot, waits 15 seconds, re-checks PID and
 start identity, and stops the selected tree. Runtime-owned terminals, MCP
 servers, and services may stop. Persisted task transcripts are not edited.
@@ -187,6 +202,8 @@ The worker's `*-recovery.json` and lightweight `*-after.json` are termination
 evidence, **not full post-resume host memory measurements**. Reopen the task or
 use `codex resume <THREAD_ID>`, take a normal scoped snapshot, and compare with
 `*-before.json`. Protected survivors or missing readings are not reclaimed RAM.
+A process that left the tree during the delay, refused a signal, or was started
+by the tree during termination was not stopped and makes the result `partial`.
 A `partial` or `failed` result never authorizes broadening the target.
 
 </details>
@@ -217,10 +234,12 @@ exited; it is not a full post-resume host-memory sample.
 
 ## Built on evidence
 
-**45 regression tests passed on Windows x64.** Live read-only diagnostics,
-controlled fixture recovery (**2 target applications → 0**, unrelated fixture
-survived), and clean public installation passed. No real Codex runtime was
-terminated for these checks. Native macOS/Linux/ARM64 results remain pending.
+**57 regression tests passed on Windows x64, and 56 (plus one Windows-only
+skip) on Linux x64 under WSL2 (Ubuntu and Alpine).** Live read-only diagnostics
+and controlled fixture recovery passed on all three: the selected tree
+stopped, an unrelated fixture survived, and a process that left the tree was
+reported `partial` instead of reclaimed. No real Codex runtime was terminated
+for these checks. Native Linux hardware, macOS and ARM64 results remain pending.
 [See the evidence and limitations](./docs/VALIDATION.md).
 
 ```text

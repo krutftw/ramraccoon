@@ -39,11 +39,14 @@ responsibility, fixture mode, and the limitations of recovery evidence.
 
 ## Evidence and limits
 
-The current local verification exercised 45 behavior regressions, Windows x64
-read-only diagnostics against an owned fixture, and controlled recovery where
-two selected processes exited while an unrelated fixture survived. It did not
-terminate or claim to repair a real Codex runtime. Native macOS/Linux/ARM64 and
-restricted-container results are not yet available for this release.
+The current local verification exercised 57 behavior regressions on Windows
+x64 and 56 on Linux x64 under WSL2 (Ubuntu and Alpine), read-only diagnostics
+against owned fixtures, and controlled recovery where the selected processes
+exited, an unrelated fixture survived, a process that left the tree was
+reported `partial`, and an abandoned job left its target running. It also
+checked a cgroup-v2 memory limit and a Codex-style bubblewrap sandbox inside
+WSL2. It did not terminate or claim to repair a real Codex runtime. Native
+Linux hardware, macOS and ARM64 results are not yet available for this release.
 
 See [VALIDATION.md](./VALIDATION.md) for reproducible commands, native versus
 parser-only coverage, current CI blockers, and earlier-release evidence.
